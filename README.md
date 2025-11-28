@@ -17,6 +17,7 @@ FRDM Project for a PONG game using different inputs
 - TFT display
 
 # Hes values for the remote
+```
 CH- -> BA45FF00
 CH -> B946FF00
 CH+ -> B847FF00
@@ -38,3 +39,4 @@ EQ -> F609FF00
 7 -> BD42FF00
 8 -> AD52FF00
 9 -> B54AFF00
+```
