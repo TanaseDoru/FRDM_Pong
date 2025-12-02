@@ -170,7 +170,7 @@ int main(void) {
     PRINTF("Gata! Apasa UN buton pe telecomanda IR...\r\n\r\n");
 
     uint32_t last_code = 0;
-    uint32_t cod_fix = 0x00FF30CF; // Schimba cu codul tau
+    uint32_t cod_fix = 0xBA45FF00; // Schimba cu codul tau
 
     while (1) {
         if (ir_ready) {
