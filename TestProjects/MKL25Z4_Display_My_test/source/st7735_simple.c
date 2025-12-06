@@ -145,7 +145,8 @@ void ST7735_Init(void) {
 
     /* Configure SPI0 - viteza rapida pentru afisare fluida */
     SPI_MasterGetDefaultConfig(&spiConfig);
-    spiConfig.baudRate_Bps = 4000000U;  /* 4 MHz - rapid! */
+//    spiConfig.baudRate_Bps = 4000000U;  /* 4 MHz - rapid! */
+    spiConfig.baudRate_Bps = 12000000U; /*12 MHz */
     spiConfig.polarity = kSPI_ClockPolarityActiveHigh;  /* CPOL=0 */
     spiConfig.phase = kSPI_ClockPhaseFirstEdge;         /* CPHA=0 */
     spiConfig.direction = kSPI_MsbFirst;
@@ -269,21 +270,32 @@ void ST7735_FillRect(int16_t x, int16_t y, int16_t w, int16_t h, uint16_t color)
     if (w <= 0 || h <= 0) return;
 
     SetWindow(x, y, x + w - 1, y + h - 1);
-    uint8_t hi = color >> 8, lo = color & 0xFF;
+
+    /* Pregătim cei doi bytes de culoare */
+    uint8_t hi = color >> 8;
+    uint8_t lo = color & 0xFF;
     uint32_t pixels = (uint32_t)w * h;
 
     DC_HIGH();
     CS_LOW();
 
-    /* Trimite pixeli rapid fara overhead */
+    /* --- TURBO MODE: Pipeline Loop --- */
+    /* Nu așteptăm răspunsul (RX) pentru fiecare byte, doar verificăm dacă avem loc în TX */
+
     while (pixels--) {
+        /* Așteaptă loc în buffer pentru High Byte */
+        while(!(SPI0->S & SPI_S_SPTEF_MASK));
         SPI0->D = hi;
-        while (!(SPI0->S & SPI_S_SPRF_MASK));
-        (void)SPI0->D;
+
+        /* Așteaptă loc în buffer pentru Low Byte */
+        while(!(SPI0->S & SPI_S_SPTEF_MASK));
         SPI0->D = lo;
-        while (!(SPI0->S & SPI_S_SPRF_MASK));
-        (void)SPI0->D;
     }
+
+    /* La final, așteptăm ca TOTUL să fie trimis fizic înainte să ridicăm CS */
+    while(!(SPI0->S & SPI_S_SPTEF_MASK)); // Buffer gol
+    while(!(SPI0->S & SPI_S_SPRF_MASK));  // Transmisie completă
+    (void)SPI0->D; // Curățăm flag-ul
 
     CS_HIGH();
 }
