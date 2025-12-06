@@ -58,10 +58,10 @@ volatile uint8_t g_needsRedraw = 1;
  * CONSTANTE PENTRU UI
  *============================================================================*/
 
-#define MENU_START_Y      40
-#define MENU_ITEM_HEIGHT  20
+#define MENU_START_Y      35   /* Urcăm meniul puțin mai sus (era 40) */
+#define MENU_ITEM_HEIGHT  18   /* Micșorăm puțin înălțimea rândurilor (era 20) */
 #define MENU_MARGIN_X     10
-#define TITLE_Y           10
+#define TITLE_Y           8    /* Titlul puțin mai sus */
 
 /* Culori pentru UI */
 #define COLOR_BG          COLOR_BLACK
@@ -206,13 +206,15 @@ void DrawMainScreen(void) {
     DrawMenuItem(1, "Select Input", g_menuState.selectedIndex == 1, true);
     DrawMenuItem(2, "Mute Music", g_menuState.selectedIndex == 2, true);
 
-    /* Afiseaza status input curent jos */
-    ST7735_DrawHLine(0, 130, ST7735_WIDTH, COLOR_GRAY);
+    /* Afiseaza status input curent jos - AJUSTAT PENTRU INALTIME 128 */
+    ST7735_DrawHLine(0, 100, ST7735_WIDTH, COLOR_GRAY); // Linia la Y=100
+
     char buf[32];
     snprintf(buf, sizeof(buf), "P1:%s", GetInputName(g_player1_input));
-    ST7735_DrawString(5, 140, buf, COLOR_CYAN, COLOR_BG);
+    ST7735_DrawString(5, 108, buf, COLOR_CYAN, COLOR_BG); // Y=108
+
     snprintf(buf, sizeof(buf), "P2:%s", GetInputName(g_player2_input));
-    ST7735_DrawString(5, 150, buf, COLOR_MAGENTA, COLOR_BG);
+    ST7735_DrawString(85, 108, buf, COLOR_MAGENTA, COLOR_BG); // Y=108 (Punem P2 in dreapta lui P1)
 }
 
 /* ECRAN START (Player vs Player / Player vs Computer) */
@@ -241,15 +243,15 @@ void DrawSelectInputScreen(void) {
 
     DrawBackOption(2, g_menuState.selectedIndex == 2);
 
-    /* Status curent */
-    ST7735_DrawHLine(0, 110, ST7735_WIDTH, COLOR_GRAY);
-    ST7735_DrawString(5, 118, "Current:", COLOR_GRAY, COLOR_BG);
+    /* Status curent - AJUSTAT */
+    ST7735_DrawHLine(0, 95, ST7735_WIDTH, COLOR_GRAY);
+    ST7735_DrawString(5, 100, "Current Setup:", COLOR_GRAY, COLOR_BG);
 
     snprintf(buf, sizeof(buf), "P1: %s", GetInputName(g_player1_input));
-    ST7735_DrawString(5, 130, buf, COLOR_CYAN, COLOR_BG);
+    ST7735_DrawString(5, 112, buf, COLOR_CYAN, COLOR_BG);
 
     snprintf(buf, sizeof(buf), "P2: %s", GetInputName(g_player2_input));
-    ST7735_DrawString(5, 142, buf, COLOR_MAGENTA, COLOR_BG);
+    ST7735_DrawString(85, 112, buf, COLOR_MAGENTA, COLOR_BG);
 }
 
 /* ECRAN SELECT PLAYER 1 INPUT */
