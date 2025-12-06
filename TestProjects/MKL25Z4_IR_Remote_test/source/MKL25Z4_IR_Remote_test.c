@@ -9,40 +9,58 @@
 #include "fsl_port.h"
 #include "fsl_gpio.h"
 
-/* Definirea pinului pentru senzorul IR (PTA12) */
+/* --- CONFIGURĂRI PIN --- */
 #define IR_PIN 12u
 #define IR_GPIO GPIOA
 #define IR_PORT PORTA
 
-/* Variabile pentru decodarea IR */
+/* --- PARAMETRI TIMING NEC (în microsecunde) --- */
+/* Timer-ul rulează la 1.5 MHz (48MHz / 32). 1 tick = 0.666 us */
+/* Factor de conversie: Ticks = us * 1.5 */
+#define TICKS_US_FACTOR      1.5f
+
+#define NEC_HDR_MARK_MIN     12000 // ~9000us (acceptăm toleranță mare pt start)
+#define NEC_HDR_SPACE_MIN    6000  // ~4500us
+#define NEC_BIT_THRESHOLD    2500  // Prag între 0 (560us) și 1 (1690us). ~1666us = 2500 ticks
+
+/* Filtru zgomot: ignorăm orice puls sub 100 ticks (~66us) */
+#define GLITCH_THRESHOLD     100
+
+/* Variabile Globale */
 volatile uint32_t ir_code = 0;
 volatile uint8_t ir_ready = 0;
 volatile uint32_t pulse_count = 0;
-volatile uint32_t pulse_buffer[68];
-volatile uint32_t last_edge_time = 0;
+volatile uint32_t pulse_buffer[100]; // Buffer puțin mai mare pentru siguranță
 volatile uint8_t capture_complete = 0;
 
-/* Functii IR */
+/* Prototypes */
 void IR_Init(void);
 void TPM0_Init(void);
-void DecodeIR(void);
+void DecodeNEC(void);
+void delay_ms(uint32_t ms);
 
-/* Handler pentru intreruperi TPM0 (timeout) */
+/* ----------------------------------------------------------------------------
+   INTERRUPT HANDLERS
+   ---------------------------------------------------------------------------- */
+
 void TPM0_IRQHandler(void) {
     if (TPM0->SC & TPM_SC_TOF_MASK) {
-        TPM0->SC |= TPM_SC_TOF_MASK; // Clear overflow flag
+        TPM0->SC |= TPM_SC_TOF_MASK; // Clear flag
 
-        // Timeout - daca am capturat date, marcheaza ca gata
-        if (pulse_count > 10) {
+        // Timeout: Dacă timer-ul a dat overflow, înseamnă că transmisia s-a terminat
+        if (pulse_count >= 66) { // Minimul necesar pentru un cadru valid
             capture_complete = 1;
             ir_ready = 1;
         } else {
+            // Zgomot sau semnal incomplet -> reset
             pulse_count = 0;
+            capture_complete = 0;
         }
     }
 }
-
-/* Handler pentru intreruperi pe portul A (senzor IR) */
+/* ----------------------------------------------------------------------------
+   INTERRUPT HANDLER OPTIMIZAT
+   ---------------------------------------------------------------------------- */
 void PORTA_IRQHandler(void) {
     uint32_t isfr = PORT_GetPinsInterruptFlags(IR_PORT);
 
@@ -50,171 +68,179 @@ void PORTA_IRQHandler(void) {
         PORT_ClearPinsInterruptFlags(IR_PORT, 1U << IR_PIN);
 
         if (!capture_complete) {
-            uint32_t current_time = TPM0->CNT;
+            uint32_t current_val = TPM0->CNT;
 
-            if (pulse_count < 68) {
-                pulse_buffer[pulse_count++] = current_time;
+            // Resetăm imediat timerul pentru a avea precizie maximă pentru următorul front
+            TPM0->CNT = 0;
+
+            // --- GLITCH FILTER ---
+            // Ignorăm pulsuri extrem de scurte (< 100 ticks / 66us)
+            // Dar le acceptăm pe celelalte.
+            if (current_val > 100) {
+                if (pulse_count < 100) {
+                    pulse_buffer[pulse_count++] = current_val;
+                }
             }
-
-            TPM0->CNT = 0; // Reset counter pentru urmatorul puls
         }
     }
 }
 
-void DecodeIR(void) {
+/* ----------------------------------------------------------------------------
+   DECODING LOGIC CORECTATĂ (Index Shift Fix)
+   ---------------------------------------------------------------------------- */
+void DecodeNEC(void) {
     ir_code = 0;
 
-    PRINTF("\r\n--- Analiza pulsuri (primele 40) ---\r\n");
-    for (int i = 0; i < 40 && i < pulse_count; i++) {
-        PRINTF("%2d: %5u  ", i, (unsigned int)pulse_buffer[i]);
-        if ((i + 1) % 4 == 0) PRINTF("\r\n");
-    }
-    PRINTF("Total pulsuri captate: %u\r\n", (unsigned int)pulse_count);
+    // Căutăm Header-ul real (aprox 13500 ticks) în primele poziții
+    // De obicei este la indexul 1 (indexul 0 este "liniștea" dinainte)
+    int start_index = -1;
 
-    // Verifică dacă avem suficiente pulsuri
-    if (pulse_count < 67) {
-        PRINTF("Prea putine pulsuri: %u (minim 67)\r\n", (unsigned int)pulse_count);
+    // Verificăm index 0 și 1
+    if (pulse_buffer[0] > 12000 && pulse_buffer[0] < 15000) start_index = 0;
+    else if (pulse_buffer[1] > 12000 && pulse_buffer[1] < 15000) start_index = 1;
+
+    if (start_index == -1) {
+        PRINTF("Header NEC invalid (Mark=%u, Space=%u)\r\n",
+               pulse_buffer[0], pulse_buffer[1]);
         return;
     }
 
-    // Găsește min/max pentru pulsurile de spațiu (impare, după preambul)
-    uint32_t min_space = 0xFFFFFFFF;
-    uint32_t max_space = 0;
+    // Luăm valorile corecte bazate pe indexul găsit
+    uint32_t hdr_mark = pulse_buffer[start_index];
+    uint32_t hdr_space = pulse_buffer[start_index + 1];
 
-    for (int i = 3; i < 67; i += 2) {
-        if (pulse_buffer[i] < min_space) min_space = pulse_buffer[i];
-        if (pulse_buffer[i] > max_space) max_space = pulse_buffer[i];
+    PRINTF("Header OK! Mark=%u, Space=%u. Decodare...\r\n", hdr_mark, hdr_space);
+
+    // Verificare Repeat Code (Space mic ~2.25ms = ~3375 ticks)
+    if (hdr_space < 4000) {
+        PRINTF(" -> Repeat Code (Tasta tinuta apasata)\r\n");
+        return;
     }
 
-    // Pragul este la jumătatea drumului între min și max
-    uint32_t threshold = (min_space + max_space) / 2;
+    // Decodare Biți
+    // Structura: [Mark] [Space] ...
+    // Datele încep după Header Mark și Header Space.
+    // Primul bit (Bit 0):
+    //   Mark: buffer[start_index + 2]
+    //   Space: buffer[start_index + 3]  <-- Aici e informația (0 sau 1)
 
-    PRINTF("Min: %u, Max: %u, Prag: %u\r\n",
-           (unsigned int)min_space, (unsigned int)max_space, (unsigned int)threshold);
-
-    // Decodifică cei 32 de biți
     for (int i = 0; i < 32; i++) {
-        uint32_t space_duration = pulse_buffer[3 + i * 2 + 1];
+        // Calculăm indexul pentru durata de SPACE a bitului 'i'
+        // Formula: start + header(2) + (i*2) + componenta_space(1)
+        int idx = start_index + 3 + (i * 2);
 
-        if (space_duration > threshold) {
+        if (idx >= pulse_count) break;
+
+        uint32_t space_duration = pulse_buffer[idx];
+
+        // Pragul:
+        // 0 Logic = 560us (~840 ticks)
+        // 1 Logic = 1690us (~2535 ticks)
+        // Prag ales: 1600 ticks (aprox 1000us)
+        if (space_duration > 1600) {
             ir_code |= (1UL << i);
         }
     }
 }
 
-void IR_Init(void) {
-    /* Enable clock pentru PORTA */
-    CLOCK_EnableClock(kCLOCK_PortA);
+/* ----------------------------------------------------------------------------
+   INITIALIZATION
+   ---------------------------------------------------------------------------- */
 
-    /* Configurare pin IR */
+void IR_Init(void) {
+    CLOCK_EnableClock(kCLOCK_PortA);
     PORT_SetPinMux(IR_PORT, IR_PIN, kPORT_MuxAsGpio);
 
-    /* Enable pull-up */
+    // IMPORTANT: Pull-up activat, senzorul este Open-Drain
     IR_PORT->PCR[IR_PIN] |= PORT_PCR_PE_MASK | PORT_PCR_PS_MASK;
 
-    /* Seteaza pin ca input */
-    gpio_pin_config_t gpioPinConfig = {
-        kGPIO_DigitalInput,
-        0,
-    };
+    gpio_pin_config_t gpioPinConfig = { kGPIO_DigitalInput, 0 };
     GPIO_PinInit(IR_GPIO, IR_PIN, &gpioPinConfig);
 
-    /* Configureaza intrerupere pe ambele fronturi */
     PORT_SetPinInterruptConfig(IR_PORT, IR_PIN, kPORT_InterruptEitherEdge);
 
-    /* Enable intreruperi pentru PORTA */
     NVIC_SetPriority(PORTA_IRQn, 2);
     EnableIRQ(PORTA_IRQn);
 }
 
 void TPM0_Init(void) {
-    /* Enable clock pentru TPM0 */
     CLOCK_EnableClock(kCLOCK_Tpm0);
 
-    /* Selecteaza sursa de clock pentru TPM */
-    CLOCK_SetTpmClock(1U); // MCGFLLCLK
+    // Sursa Clock: MCGFLLCLK (aprox 48MHz standard pe FRDM-KL25Z)
+    CLOCK_SetTpmClock(1U);
 
-    /* Configurare TPM0 */
-    TPM0->SC = 0; // Disable timer
-    TPM0->CNT = 0; // Reset counter
-    TPM0->MOD = 0xFFFF; // Valoare maxima
+    TPM0->SC = 0;
+    TPM0->CNT = 0;
+    TPM0->MOD = 0xFFFF; // Max count
 
-    /* Prescaler = 32, overflow interrupt enable */
+    // Prescaler 32 -> 48MHz / 32 = 1.5 MHz (1 tick = 0.66 us)
+    // Overflow la ~43ms (suficient pt a detecta pauza dintre cadre)
     TPM0->SC = TPM_SC_PS(5) | TPM_SC_TOIE_MASK | TPM_SC_CMOD(1);
 
-    /* Enable intreruperi TPM0 */
     NVIC_SetPriority(TPM0_IRQn, 3);
     EnableIRQ(TPM0_IRQn);
 }
 
 void delay_ms(uint32_t ms) {
-    for (uint32_t i = 0; i < ms * 6000; i++) {
-        __asm volatile("nop");
-    }
+    // Estimare brută pentru delay
+    for (volatile uint32_t i = 0; i < ms * 4000; i++);
 }
 
+/* ----------------------------------------------------------------------------
+   MAIN
+   ---------------------------------------------------------------------------- */
+
 int main(void) {
-    /* Init board hardware */
     BOARD_InitBootPins();
     BOARD_InitBootClocks();
     BOARD_InitBootPeripherals();
     BOARD_InitDebugConsole();
 
-    PRINTF("\r\n=== IR Remote Decoder - Debug Mode ===\r\n");
-    PRINTF("Initializare senzor IR pe PTA12...\r\n");
+    PRINTF("\r\n=== IR NEC Decoder - Optimizat ===\r\n");
 
-    /* Initializare IR si Timer */
     IR_Init();
     TPM0_Init();
 
-    PRINTF("Gata! Apasa UN buton pe telecomanda IR...\r\n\r\n");
-
-    uint32_t last_code = 0;
-    uint32_t cod_fix = 0xBA45FF00; // Schimba cu codul tau
+    PRINTF("Sistem gata. Astept semnal...\r\n");
 
     while (1) {
         if (ir_ready) {
-            ir_ready = 0;
-            capture_complete = 0;
+            // Dezactivăm întreruperile scurt timp pentru a procesa datele atomic (opțional dar recomandat)
+            NVIC_DisableIRQ(PORTA_IRQn);
 
-            // Decodifica pulsurile
-            DecodeIR();
+            DecodeNEC();
 
-            PRINTF("\r\nCod IR decodificat: 0x%08X\r\n", (unsigned int)ir_code);
+            // Dacă codul e valid (nu e 0)
+            if (ir_code != 0) {
+                // Inversăm ordinea pentru a citi mai ușor (unele telecomenzi trimit invers)
+                // Dar afișăm raw hex cum ai cerut:
+                PRINTF("Cod Decodat: 0x%08X\r\n", ir_code);
 
-            // Afiseaza si fiecare byte separat
-            PRINTF("  Bytes: %02X %02X %02X %02X\r\n",
-                   (unsigned int)((ir_code >> 24) & 0xFF),
-                   (unsigned int)((ir_code >> 16) & 0xFF),
-                   (unsigned int)((ir_code >> 8) & 0xFF),
-                   (unsigned int)(ir_code & 0xFF));
+                // Analiză structură
+                uint8_t cmd = (ir_code >> 8) & 0xFF;
+                PRINTF(" -> Tasta (CMD): 0x%02X\r\n", cmd);
 
-            // Comparatie cu valoare fixa
-            if (ir_code == cod_fix) {
-                PRINTF("  -> MATCH! Cod recunoscut!\r\n");
+                // Exemplu mapare taste bazat pe lista ta
+                switch(ir_code) {
+                    case 0xF30CFF00: PRINTF(" -> Tasta: 1\r\n"); break;
+                    case 0xE718FF00: PRINTF(" -> Tasta: 2\r\n"); break;
+                    case 0xA15EFF00: PRINTF(" -> Tasta: 3\r\n"); break;
+                    case 0xBA45FF00: PRINTF(" -> Tasta: POWER/CH-\r\n"); break;
+                    default: PRINTF(" -> Tasta necunoscuta\r\n"); break;
+                }
             }
 
-            // Protocol NEC: verificare
-            uint8_t addr = (ir_code >> 24) & 0xFF;
-            uint8_t addr_inv = (ir_code >> 16) & 0xFF;
-            uint8_t cmd = (ir_code >> 8) & 0xFF;
-            uint8_t cmd_inv = ir_code & 0xFF;
-
-            PRINTF("  Address: 0x%02X (inv: 0x%02X) %s\r\n",
-                   addr, addr_inv, (addr == (uint8_t)~addr_inv) ? "[OK]" : "[ERR]");
-            PRINTF("  Command: 0x%02X (inv: 0x%02X) %s\r\n",
-                   cmd, cmd_inv, (cmd == (uint8_t)~cmd_inv) ? "[OK]" : "[ERR]");
-
-            last_code = ir_code;
-
-            // Reset pentru următoarea captură
+            // Reset flags
+            ir_ready = 0;
+            capture_complete = 0;
             pulse_count = 0;
 
-            PRINTF("\r\nGata pentru urmatorul buton...\r\n\r\n");
+            PRINTF("-------------------------------\r\n");
+
+            NVIC_EnableIRQ(PORTA_IRQn);
         }
 
-        delay_ms(10);
+        // Buclă idle, așteptăm interrupt
+        __asm("wfi");
     }
-
-    return 0;
 }
