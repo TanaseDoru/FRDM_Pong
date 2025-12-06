@@ -29,8 +29,8 @@
 #define ST7735_GMCTRN1 0xE1
 
 /* Display size */
-#define ST7735_WIDTH  128
-#define ST7735_HEIGHT 160
+#define ST7735_WIDTH  160
+#define ST7735_HEIGHT 128
 
 /* RGB565 Colors */
 #define COLOR_BLACK       0x0000

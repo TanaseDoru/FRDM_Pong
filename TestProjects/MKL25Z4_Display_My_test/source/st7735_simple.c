@@ -207,7 +207,8 @@ void ST7735_Init(void) {
     delay_ms(10);
 
     WriteCommand(ST7735_MADCTL);
-    WriteData(0xC8);
+//    WriteData(0xC8);
+    WriteData(0xA8);
     delay_ms(10);
 
     WriteCommand(ST7735_COLMOD);

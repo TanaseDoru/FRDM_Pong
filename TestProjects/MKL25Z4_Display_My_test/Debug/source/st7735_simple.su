@@ -1,20 +1,20 @@
-C:\Users\Tanase\Desktop\MCUXpress projects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
-C:\Users\Tanase\Desktop\MCUXpress projects\MKL25Z4_Display_My_test\drivers/fsl_spi.h:350:20:SPI_Enable	16	static
-C:\Users\Tanase\Desktop\MCUXpress projects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_spi.h:350:20:SPI_Enable	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
 ../source/st7735_simple.c:59:13:delay_ms	24	static
 ../source/st7735_simple.c:64:20:SPI_WriteByteFast	16	static
 ../source/st7735_simple.c:87:13:WriteCommand	16	static
 ../source/st7735_simple.c:94:13:WriteData	16	static
 ../source/st7735_simple.c:102:13:SetWindow	24	static
 ../source/st7735_simple.c:125:6:ST7735_Init	24	static
-../source/st7735_simple.c:248:6:ST7735_FillScreen	24	static
-../source/st7735_simple.c:252:6:ST7735_DrawPixel	24	static
-../source/st7735_simple.c:262:6:ST7735_FillRect	32	static
-../source/st7735_simple.c:291:6:ST7735_DrawHLine	32	static
-../source/st7735_simple.c:314:6:ST7735_DrawVLine	32	static
-../source/st7735_simple.c:337:6:ST7735_DrawRect	24	static
-../source/st7735_simple.c:345:6:ST7735_DrawChar	48	static
-../source/st7735_simple.c:371:6:ST7735_DrawString	40	static
-../source/st7735_simple.c:380:6:ST7735_DrawStringScaled	48	static
-../source/st7735_simple.c:389:6:ST7735_DrawStringCentered	48	static
-../source/st7735_simple.c:396:6:ST7735_DrawMenuBox	32	static
+../source/st7735_simple.c:249:6:ST7735_FillScreen	24	static
+../source/st7735_simple.c:253:6:ST7735_DrawPixel	24	static
+../source/st7735_simple.c:263:6:ST7735_FillRect	32	static
+../source/st7735_simple.c:292:6:ST7735_DrawHLine	32	static
+../source/st7735_simple.c:315:6:ST7735_DrawVLine	32	static
+../source/st7735_simple.c:338:6:ST7735_DrawRect	24	static
+../source/st7735_simple.c:346:6:ST7735_DrawChar	48	static
+../source/st7735_simple.c:372:6:ST7735_DrawString	40	static
+../source/st7735_simple.c:381:6:ST7735_DrawStringScaled	48	static
+../source/st7735_simple.c:390:6:ST7735_DrawStringCentered	48	static
+../source/st7735_simple.c:397:6:ST7735_DrawMenuBox	32	static
