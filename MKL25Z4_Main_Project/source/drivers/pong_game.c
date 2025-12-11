@@ -44,15 +44,15 @@ void Game_Update(void) {
         // Logica IR pentru miscare continua e mai grea (nu ai hold),
         // folosim un "impuls" de miscare cand primim codul
         uint32_t ir = IR_GetLastCode();
-        if (ir == IR_CODE_CH_UP) p1.y -= 5;
-        if (ir == IR_CODE_CH_DOWN) p1.y += 5;
+        if (ir == IR_CODE_UP) p1.y -= 5;
+        if (ir == IR_CODE_DOWN) p1.y += 5;
     }
 
     /* 2. Miscare Paleta P2 */
     if (p2.input == INPUT_REMOTE) {
         uint32_t ir = IR_GetLastCode();
-        if (ir == IR_CODE_CH_UP) p2.y -= 5;
-        if (ir == IR_CODE_CH_DOWN) p2.y += 5;
+        if (ir == IR_CODE_UP) p2.y -= 5;
+        if (ir == IR_CODE_DOWN) p2.y += 5;
     }
     /* Joystick pentru P2 nu e implementat hardware (avem un singur ADC port conectat fizic)
        dar logica permite */

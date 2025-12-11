@@ -127,17 +127,12 @@ UI_Action_t IR_GetMenuAction(void) {
     if (code == 0) return ACTION_NONE;
 
     switch(code) {
-        case IR_CODE_CH_UP:
-        case IR_CODE_VOL_UP:
+        case IR_CODE_CH_MINUS:
             return ACTION_UP;
-        case IR_CODE_VOL_DOWN:
+        case IR_CODE_CH:
             return ACTION_DOWN;
-        case IR_CODE_PLAY:
-        case 0xF30CFF00: // Tasta 1 (Select)
+        case IR_CODE_PREV:
             return ACTION_SELECT;
-        case 0xBA45FF00: // CH- (Poate fi si Back in functie de context)
-        case IR_CODE_0:
-            return ACTION_BACK;
     }
     return ACTION_NONE;
 }

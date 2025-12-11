@@ -9,21 +9,30 @@ typedef enum {
     INPUT_NONE = 0,
     INPUT_JOYSTICK,
     INPUT_REMOTE,
-    INPUT_GYROSCOPE // Placeholder
+    INPUT_GYROSCOPE
 } InputType_t;
 
 /* --- Screen States --- */
 typedef enum {
-    SCREEN_MAIN = 0,
+    SCREEN_BOOT_HELP = 0,
+    SCREEN_MAIN,
     SCREEN_START,
     SCREEN_SELECT_INPUT,
     SCREEN_SELECT_P1,
     SCREEN_SELECT_P2,
+	SCREEN_DIFFICULTY,
     SCREEN_GAMEPLAY,
     SCREEN_GAME_OVER
 } Screen_t;
 
-/* --- Abstract Input Actions (pentru navigare meniu) --- */
+/*  --- Difficulty Selections ---  */
+typedef enum{
+	DIFF_EASY = 0,
+	DIFF_NORMAL,
+	DIFF_HARD
+} Difficulty_t;
+
+/* --- Abstract Input Actions --- */
 typedef enum {
     ACTION_NONE = 0,
     ACTION_UP,

@@ -17,9 +17,11 @@
 /* --- Variabile Globale (definite in game_config.h ca extern) --- */
 InputType_t g_player1_input = INPUT_JOYSTICK; // Implicit P1 = Joystick
 InputType_t g_player2_input = INPUT_NONE;
-Screen_t g_currentScreen = SCREEN_MAIN;
+Screen_t g_currentScreen = SCREEN_BOOT_HELP;
 MenuState_t g_menuState = {0, 3};
 volatile uint8_t g_needsRedraw = 1;
+Difficulty_t g_currentDifficulty = DIFF_EASY;
+
 
 void delay_ms(uint32_t ms) {
     for (uint32_t i = 0; i < ms * 6000; i++) __asm volatile("nop");
@@ -59,9 +61,10 @@ void ProcessMenuInput(void) {
             case ACTION_SELECT:
                 PRINTF("UI: SELECT\r\n");
                 // Logica speciala pentru Start Game
-                if (g_currentScreen == SCREEN_START && g_menuState.selectedIndex == 0) {
+                if (g_currentScreen == SCREEN_DIFFICULTY && g_menuState.selectedIndex != 3) { // != BACK
                      if (Menu_CanStartGame()) {
                          g_currentScreen = SCREEN_GAMEPLAY;
+                         g_currentDifficulty = (Difficulty_t)g_menuState.selectedIndex;
                          Game_Init();
                      }
                 } else {
@@ -79,6 +82,22 @@ void ProcessMenuInput(void) {
             	break;
         }
     }
+}
+
+void processFPS()
+{
+	switch(g_currentDifficulty)
+	{
+	case DIFF_EASY:
+		delay_ms(20);
+		break;
+	case DIFF_NORMAL:
+		delay_ms(15);
+		break;
+	case DIFF_HARD:
+		delay_ms(8);
+		break;
+	}
 }
 
 int main(void) {
@@ -106,7 +125,7 @@ int main(void) {
         if (g_currentScreen == SCREEN_GAMEPLAY) {
             /* --- GAME LOOP --- */
             Game_Update();
-            delay_ms(20); // ~50 FPS
+            processFPS();
 
             // Verificare buton Back/Exit din joc (Joystick click sau IR 0)
             if (Joystick_GetMenuAction() == ACTION_SELECT) {

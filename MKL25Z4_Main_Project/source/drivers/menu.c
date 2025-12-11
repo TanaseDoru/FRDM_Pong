@@ -3,7 +3,7 @@
 #include "fsl_debug_console.h"
 #include <stdio.h>
 
-/* Importam variabilele externe definite in main.c */
+/* Importam variabilele externe */
 extern Screen_t g_currentScreen;
 extern MenuState_t g_menuState;
 extern InputType_t g_player1_input;
@@ -27,7 +27,6 @@ static void DrawMenuItem(uint8_t index, const char* text, bool selected) {
     ST7735_DrawString(22, y + 6, text, textColor, bgColor);
 }
 
-/* Helper pt nume input */
 static const char* GetInputName(InputType_t input) {
     switch (input) {
         case INPUT_JOYSTICK:  return "Joystick";
@@ -36,12 +35,40 @@ static const char* GetInputName(InputType_t input) {
     }
 }
 
+static void DrawBootHelpScreen(void) {
+    ST7735_FillScreen(COLOR_BLACK);
+    DrawTitle("CONTROLS");
+
+    /* Sectiunea Player 1 - Joystick */
+    ST7735_DrawString(5, 35, "Joystick - Player 1", COLOR_CYAN, COLOR_BLACK);
+    ST7735_DrawString(10, 48, "Up/Down : Scroll", COLOR_WHITE, COLOR_BLACK);
+    ST7735_DrawString(10, 58, "Press   : Select", COLOR_WHITE, COLOR_BLACK);
+
+    /* Sectiunea Player 2 - Remote */
+    ST7735_DrawString(5, 68, "Remote - Player 2", COLOR_MAGENTA, COLOR_BLACK);
+    ST7735_DrawString(10, 78, "CH-   : Scroll Up", COLOR_WHITE, COLOR_BLACK);
+    ST7735_DrawString(10, 88, "CH    : Scroll Down", COLOR_WHITE, COLOR_BLACK);
+    ST7735_DrawString(10, 98,"PREV  : Select", COLOR_WHITE, COLOR_BLACK);
+
+    /* Footer - Instructiunea de start */
+    ST7735_DrawHLine(0, 108, ST7735_WIDTH, COLOR_GRAY);
+    ST7735_DrawStringCentered(112, "Press SWITCH to Start", COLOR_GREEN, COLOR_BLACK, 1);
+}
+
 /* --- FUNCTII PUBLICE --- */
 
 void Menu_DrawCurrent(void) {
-    ST7735_FillScreen(COLOR_BLACK);
+    /* Daca nu e Boot Help, stergem ecranul standard.
+       Boot Help are propria stergere in functie */
+    if (g_currentScreen != SCREEN_BOOT_HELP) {
+        ST7735_FillScreen(COLOR_BLACK);
+    }
 
     switch (g_currentScreen) {
+        case SCREEN_BOOT_HELP:
+            DrawBootHelpScreen();
+            break;
+
         case SCREEN_MAIN:
             DrawTitle("PONG");
             DrawMenuItem(0, "Start Game", g_menuState.selectedIndex == 0);
@@ -52,20 +79,17 @@ void Menu_DrawCurrent(void) {
         case SCREEN_START:
             DrawTitle("GAME MODE");
             DrawMenuItem(0, "Player vs Player", g_menuState.selectedIndex == 0);
-            DrawMenuItem(1, "Player vs CPU", g_menuState.selectedIndex == 1); // NotImplemented
+            DrawMenuItem(1, "Player vs CPU", g_menuState.selectedIndex == 1);
             DrawMenuItem(2, "Back", g_menuState.selectedIndex == 2);
             break;
 
         case SCREEN_SELECT_INPUT:
             DrawTitle("SETUP");
-
             char buf[30];
             snprintf(buf, sizeof(buf), "P1: %s", GetInputName(g_player1_input));
             DrawMenuItem(0, buf, g_menuState.selectedIndex == 0);
-
             snprintf(buf, sizeof(buf), "P2: %s", GetInputName(g_player2_input));
             DrawMenuItem(1, buf, g_menuState.selectedIndex == 1);
-
             DrawMenuItem(2, "Back", g_menuState.selectedIndex == 2);
             break;
 
@@ -84,15 +108,29 @@ void Menu_DrawCurrent(void) {
             DrawMenuItem(2, "None", g_menuState.selectedIndex == 2);
             DrawMenuItem(3, "Back", g_menuState.selectedIndex == 3);
             break;
+        case SCREEN_DIFFICULTY:
+        	DrawTitle("Difficulty");
+        	DrawMenuItem(0, "Easy", g_menuState.selectedIndex == 0);
+        	DrawMenuItem(1, "Normal", g_menuState.selectedIndex == 1);
+        	DrawMenuItem(2, "Hard", g_menuState.selectedIndex == 2);
+        	DrawMenuItem(3, "Back", g_menuState.selectedIndex == 3);
+        	break;
 
-        default:
-            break;
+        default: break;
     }
 }
 
-/* --- LOGICA DE TRANZITIE (Aceasta e functia care lipsea!) --- */
 void Menu_Select(void) {
     switch (g_currentScreen) {
+
+        /* LOGICA PENTRU ECRANUL DE START (HELP) */
+        case SCREEN_BOOT_HELP:
+            /* Orice selectie (apasare buton) ne duce in Main Menu */
+            g_currentScreen = SCREEN_MAIN;
+            g_menuState.selectedIndex = 0;
+            g_menuState.maxItems = 3;
+            break;
+
         case SCREEN_MAIN:
             if (g_menuState.selectedIndex == 0) { // Start
                 g_currentScreen = SCREEN_START;
@@ -102,6 +140,8 @@ void Menu_Select(void) {
                 g_currentScreen = SCREEN_SELECT_INPUT;
                 g_menuState.selectedIndex = 0;
                 g_menuState.maxItems = 3;
+            } else if (g_menuState.selectedIndex == 2) { // Help (din meniu)
+                g_currentScreen = SCREEN_BOOT_HELP;
             }
             break;
 
@@ -111,8 +151,21 @@ void Menu_Select(void) {
                 g_menuState.selectedIndex = 0;
                 g_menuState.maxItems = 3;
             }
-            // Start game este gestionat direct in main.c prin ACTION_SELECT + Menu_CanStartGame
+            else
+            {
+            	g_currentScreen = SCREEN_DIFFICULTY;
+            	g_menuState.selectedIndex = 0;
+            	g_menuState.maxItems = 4;
+            }
             break;
+        case SCREEN_DIFFICULTY:
+        	if(g_menuState.selectedIndex == 3) // Back
+			{
+				g_currentScreen = SCREEN_START;
+                g_menuState.selectedIndex = 0;
+                g_menuState.maxItems = 3;
+			}
+        	break;
 
         case SCREEN_SELECT_INPUT:
             if (g_menuState.selectedIndex == 0) { // P1
@@ -139,8 +192,6 @@ void Menu_Select(void) {
                 if (g_menuState.selectedIndex == 0) g_player1_input = INPUT_JOYSTICK;
                 if (g_menuState.selectedIndex == 1) g_player1_input = INPUT_REMOTE;
                 if (g_menuState.selectedIndex == 2) g_player1_input = INPUT_NONE;
-
-                // Auto-return
                 g_currentScreen = SCREEN_SELECT_INPUT;
                 g_menuState.selectedIndex = 0;
                 g_menuState.maxItems = 3;
@@ -156,8 +207,6 @@ void Menu_Select(void) {
                 if (g_menuState.selectedIndex == 0) g_player2_input = INPUT_JOYSTICK;
                 if (g_menuState.selectedIndex == 1) g_player2_input = INPUT_REMOTE;
                 if (g_menuState.selectedIndex == 2) g_player2_input = INPUT_NONE;
-
-                // Auto-return
                 g_currentScreen = SCREEN_SELECT_INPUT;
                 g_menuState.selectedIndex = 1;
                 g_menuState.maxItems = 3;
