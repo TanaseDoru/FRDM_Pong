@@ -1,7 +1,7 @@
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:745:20:CLOCK_SetSimSafeDivs	8	static
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:1076:20:CLOCK_SetXtal0Freq	16	static
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_smc.h:283:20:SMC_SetPowerModeProtection	16	static
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_smc.h:302:33:SMC_GetPowerModeState	16	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:745:20:CLOCK_SetSimSafeDivs	8	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:1076:20:CLOCK_SetXtal0Freq	16	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_smc.h:283:20:SMC_SetPowerModeProtection	16	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_smc.h:302:33:SMC_GetPowerModeState	16	static
 ../board/clock_config.c:95:6:BOARD_InitBootClocks	8	static
 ../board/clock_config.c:107:13:CLOCK_CONFIG_SetFllExtRefDiv	16	static
 ../board/clock_config.c:192:6:BOARD_BootClockRUN	8	static

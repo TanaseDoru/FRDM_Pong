@@ -1,4 +1,4 @@
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
 ../board/pin_mux.c:67:6:BOARD_InitBootPins	8	static
 ../board/pin_mux.c:78:6:BOARD_InitPins	8	static
