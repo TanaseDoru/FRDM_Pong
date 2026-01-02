@@ -1,6 +1,7 @@
 /*
  * menu.h
- * Header pentru logica de meniu și UI
+ * Header pentru logica de meniu si UI
+ * Include ecranele de intro, meniu, selectie si game over
  */
 
 #ifndef MENU_H
@@ -8,36 +9,72 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "game_config.h" // Necesar pentru tipurile Screen_t si MenuState_t
+#include "game_config.h"
 
-/* * Structura pentru starea meniului
- * (Definita aici sau in game_config.h, dar daca e folosita doar de meniu si main, e ok aici)
+/*============================================================================
+ * PUBLIC FUNCTIONS - MENU NAVIGATION
+ *============================================================================*/
+
+/**
+ * Deseneaza ecranul curent bazat pe g_currentScreen
  */
-typedef struct {
-    uint8_t selectedIndex;
-    uint8_t maxItems;
-} MenuState_t;
-
-/* --- Variabile Externe (definite in menu.c sau main.c) --- */
-/* Le declaram extern pentru ca main.c sa le poata modifica direct la input */
-extern MenuState_t g_menuState;
-extern volatile uint8_t g_needsRedraw;
-extern Screen_t g_currentScreen;
-
-/* --- Funcții Publice --- */
-
-/* Desenează ecranul curent (Main, Settings, Game, etc.) pe baza g_currentScreen */
 void Menu_DrawCurrent(void);
 
-/* Procesează selecția curentă (Enter/Select) și face tranzitia între ecrane */
+/**
+ * Proceseaza selectia curenta si face tranzitia intre ecrane
+ */
 void Menu_Select(void);
 
-/* Verifică dacă condițiile de start sunt îndeplinite (ex: P2 are input selectat) */
-/* Returnează true dacă putem începe jocul */
+/**
+ * Verifica daca se poate incepe jocul
+ * (P2 are input selectat)
+ * @return true daca putem incepe
+ */
 bool Menu_CanStartGame(void);
 
-/* Funcții helper pentru navigare (Opțional, dacă nu modifici direct g_menuState în main) */
+/**
+ * Muta selectia in sus
+ */
 void Menu_MoveUp(void);
+
+/**
+ * Muta selectia in jos
+ */
 void Menu_MoveDown(void);
+
+/*============================================================================
+ * PUBLIC FUNCTIONS - SPECIAL SCREENS
+ *============================================================================*/
+
+/**
+ * Ruleaza animatia de intro (BMO + Pong Demo)
+ * Blocant - asteapta apasarea butonului
+ */
+void Menu_PlayIntroAnimation(void);
+
+/**
+ * Deseneaza ecranul de pauza (overlay)
+ */
+void Menu_DrawPauseScreen(void);
+
+/**
+ * Deseneaza ecranul de Game Over
+ */
+void Menu_DrawGameOverScreen(void);
+
+/*============================================================================
+ * HELPER FUNCTIONS
+ *============================================================================*/
+
+/**
+ * Returneaza numele unui tip de input
+ */
+const char* GetInputName(InputType_t input);
+
+/**
+ * Verifica daca un input este disponibil pentru un jucator
+ * (nu e folosit de celalalt jucator)
+ */
+bool IsInputAvailable(InputType_t input, uint8_t forPlayer);
 
 #endif /* MENU_H */

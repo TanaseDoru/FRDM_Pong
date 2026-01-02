@@ -26,9 +26,9 @@
 /* Tipuri de input disponibile */
 typedef enum {
     INPUT_NONE = 0,
-    INPUT_KEYBOARD,      /* Control de la PC/serial */
     INPUT_JOYSTICK,
     INPUT_REMOTE,
+	INPUT_GYROSCOPE,
     INPUT_CPU_EASY,      /* Bot - nivel usor */
     INPUT_CPU_MEDIUM,    /* Bot - nivel mediu */
     INPUT_CPU_HARD       /* Bot - nivel greu */
@@ -320,7 +320,6 @@ int16_t Joystick_GetY_Percent(void) {
 /* Obtine numele input-ului */
 const char* GetInputName(InputType_t input) {
     switch (input) {
-        case INPUT_KEYBOARD:  return "Keyboard";
         case INPUT_JOYSTICK:  return "Joystick";
         case INPUT_REMOTE:    return "Remote";
         case INPUT_CPU_EASY:  return "CPU Easy";
@@ -697,9 +696,6 @@ void Game_Update(void) {
         } else if (joy_y < -15) {
             paddle1.y += (joy_y / 25);  /* Miscare in sus */
         }
-    } else if (paddle1.input == INPUT_KEYBOARD) {
-        /* Control de la tastatura */
-        paddle1.y += g_p1_move * PADDLE_SPEED;
     }
 
     /* Paleta 2 (dreapta) */
@@ -714,9 +710,6 @@ void Game_Update(void) {
         } else if (joy_y < -15) {
             paddle2.y += (joy_y / 25);
         }
-    } else if (paddle2.input == INPUT_KEYBOARD) {
-        /* Control de la tastatura */
-        paddle2.y += g_p2_move * PADDLE_SPEED;
     }
 
     /* Limiteaza pozitiile paletelor */
@@ -1015,7 +1008,6 @@ void DrawSelectP1Screen(void) {
     ST7735_FillScreen(COLOR_BG);
     DrawTitle("PLAYER 1");
 
-    DrawInputMenuItem(0, INPUT_KEYBOARD, g_menuState.selectedIndex == 0, 1);
     DrawInputMenuItem(1, INPUT_JOYSTICK, g_menuState.selectedIndex == 1, 1);
     DrawInputMenuItem(2, INPUT_REMOTE, g_menuState.selectedIndex == 2, 1);
     DrawInputMenuItem(3, INPUT_CPU_EASY, g_menuState.selectedIndex == 3, 1);
@@ -1028,7 +1020,6 @@ void DrawSelectP2Screen(void) {
     ST7735_FillScreen(COLOR_BG);
     DrawTitle("PLAYER 2");
 
-    DrawInputMenuItem(0, INPUT_KEYBOARD, g_menuState.selectedIndex == 0, 2);
     DrawInputMenuItem(1, INPUT_JOYSTICK, g_menuState.selectedIndex == 1, 2);
     DrawInputMenuItem(2, INPUT_REMOTE, g_menuState.selectedIndex == 2, 2);
     DrawInputMenuItem(3, INPUT_CPU_EASY, g_menuState.selectedIndex == 3, 2);
@@ -1633,13 +1624,13 @@ void Menu_Select(void) {
                 case 0: /* Player vs Player */
                     PRINTF("Starting PvP game!\r\n");
                     /* Foloseste input-urile deja selectate */
-                    /* Daca P2 e CPU, pune-l pe Keyboard pentru PvP */
+                    /* Daca P2 e CPU, pune-l pe Remote pentru PvP */
                     if (IsCPUInput(g_player2_input)) {
-                        g_player2_input = INPUT_KEYBOARD;
+                        g_player2_input = INPUT_REMOTE;
                     }
-                    /* Daca ambii au acelasi input fizic, pune P2 pe Keyboard */
+                    /* Daca ambii au acelasi input fizic, pune P2 pe Remote*/
                     if (g_player1_input == g_player2_input && !IsCPUInput(g_player1_input)) {
-                        g_player2_input = INPUT_KEYBOARD;
+                        g_player2_input = INPUT_REMOTE;
                         if (g_player1_input == INPUT_KEYBOARD) {
                             g_player2_input = INPUT_JOYSTICK;
                         }

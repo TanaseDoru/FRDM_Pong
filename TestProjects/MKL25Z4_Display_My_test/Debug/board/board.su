@@ -1,2 +1,2 @@
-C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:620:20:CLOCK_SetLpsci0Clock	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:620:20:CLOCK_SetLpsci0Clock	16	static
 ../board/board.c:44:6:BOARD_InitDebugConsole	16	static
