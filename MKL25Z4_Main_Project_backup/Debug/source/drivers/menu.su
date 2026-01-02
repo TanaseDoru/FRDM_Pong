@@ -1,0 +1,7 @@
+../source/drivers/menu.c:14:13:DrawTitle	24	static
+../source/drivers/menu.c:20:13:DrawMenuItem	40	static
+../source/drivers/menu.c:30:20:GetInputName	16	static
+../source/drivers/menu.c:38:13:DrawBootHelpScreen	16	static
+../source/drivers/menu.c:60:6:Menu_DrawCurrent	40	static
+../source/drivers/menu.c:123:6:Menu_Select	8	static
+../source/drivers/menu.c:221:6:Menu_CanStartGame	16	static

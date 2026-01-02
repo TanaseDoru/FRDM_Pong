@@ -1,0 +1,4 @@
+../drivers/fsl_common.h:265:24:DisableGlobalIRQ	16	static
+../drivers/fsl_common.h:292:20:EnableGlobalIRQ	24	static
+C:/nxp/MCUXpressoIDE_25.6.136/ide/plugins/com.nxp.mcuxpresso.tools.win32_25.6.0.202501151204/tools/redlib/include/assert.h:28:6:__assertion_failed	16	static
+../drivers/fsl_common.c:70:10:InstallIRQHandler	32	static

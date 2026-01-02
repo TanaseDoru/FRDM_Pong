@@ -1,0 +1,20 @@
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_spi.h:350:20:SPI_Enable	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
+../source/drivers/st7735_simple.c:59:13:delay_ms	24	static
+../source/drivers/st7735_simple.c:64:20:SPI_WriteByteFast	16	static
+../source/drivers/st7735_simple.c:87:13:WriteCommand	16	static
+../source/drivers/st7735_simple.c:94:13:WriteData	16	static
+../source/drivers/st7735_simple.c:102:13:SetWindow	24	static
+../source/drivers/st7735_simple.c:125:6:ST7735_Init	24	static
+../source/drivers/st7735_simple.c:250:6:ST7735_FillScreen	24	static
+../source/drivers/st7735_simple.c:254:6:ST7735_DrawPixel	24	static
+../source/drivers/st7735_simple.c:264:6:ST7735_FillRect	32	static
+../source/drivers/st7735_simple.c:304:6:ST7735_DrawHLine	32	static
+../source/drivers/st7735_simple.c:327:6:ST7735_DrawVLine	32	static
+../source/drivers/st7735_simple.c:350:6:ST7735_DrawRect	24	static
+../source/drivers/st7735_simple.c:358:6:ST7735_DrawChar	48	static
+../source/drivers/st7735_simple.c:384:6:ST7735_DrawString	40	static
+../source/drivers/st7735_simple.c:393:6:ST7735_DrawStringScaled	48	static
+../source/drivers/st7735_simple.c:402:6:ST7735_DrawStringCentered	48	static
+../source/drivers/st7735_simple.c:409:6:ST7735_DrawMenuBox	32	static

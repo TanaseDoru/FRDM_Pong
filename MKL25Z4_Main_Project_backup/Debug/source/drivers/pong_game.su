@@ -1,0 +1,2 @@
+../source/drivers/pong_game.c:22:6:Game_Init	24	static
+../source/drivers/pong_game.c:46:6:Game_Update	56	static
