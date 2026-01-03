@@ -1,0 +1,13 @@
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\CMSIS/core_cm0plus.h:745:22:NVIC_EnableIRQ	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\CMSIS/core_cm0plus.h:804:22:NVIC_SetPriority	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_clock.h:614:20:CLOCK_SetTpmClock	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_common.h:212:20:EnableIRQ	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_port.h:389:20:PORT_SetPinInterruptConfig	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\MKL25Z4_Main_Project\drivers/fsl_port.h:418:20:PORT_ClearPinsInterruptFlags	16	static
+../source/drivers/ir_remote.c:20:6:PORTA_IRQHandler	16	static
+../source/drivers/ir_remote.c:33:6:IR_Init	16	static
+../source/drivers/ir_remote.c:54:6:IR_Process	40	static
+../source/drivers/ir_remote.c:116:10:IR_GetLastCode	8	static
+../source/drivers/ir_remote.c:125:13:IR_GetMenuAction	16	static
