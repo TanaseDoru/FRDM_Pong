@@ -121,10 +121,7 @@ static GameState_t game;
 static int8_t g_p1_move = 0;
 static int8_t g_p2_move = 0;
 
-static float g_gyro_angle = 0.0f;
-static int16_t g_gyro_paddle_y = 0;
-static uint32_t g_last_gyro_update = 0;
-#define GYRO_UPDATE_MS 50
+
 
 /*============================================================================
  * CONSTANTE PENTRU JOC
@@ -294,9 +291,9 @@ void UI_PrintStats(void) {
 
         if (g_currentScreen == SCREEN_GAMEPLAY) {
             float fps = (float)g_ui_timers.frame_count / 5.0f;
-            PRINTF("[UI STATS] FPS: %.1f | Ball draws: %lu | Paddle draws: %lu\r\n",
+            PRINTF("[UI STATS] FPS: %f | Ball draws: %d | Paddle draws: %d\r\n",
                    fps, g_ui_timers.ball_draw_count, g_ui_timers.paddle_draw_count);
-            PRINTF("[UI TIMERS] Ball: %lu ms | Paddle: %lu ms | Update: %lu ms\r\n",
+            PRINTF("[UI TIMERS] Ball: %d ms | Paddle: %d ms | Update: %d ms\r\n",
                    g_ui_timers.last_ball_draw_time, g_ui_timers.last_paddle_draw_time,
                    g_ui_timers.last_game_update_time);
         }
@@ -647,7 +644,7 @@ bool IR_IsPausePressed(void) {
     return pause_pressed;
 }
 /*============================================================================
- * FUNCTII GYROSCOPE (UART)
+ * FUNCTII GYROSCOPE / ESP (UART1)
  *============================================================================*/
 
 #define GYRO_UART UART1
@@ -657,6 +654,10 @@ bool IR_IsPausePressed(void) {
 
 static char g_gyro_rx_buffer[GYRO_BUFFER_SIZE];
 static uint8_t g_gyro_rx_index = 0;
+
+static float  g_gyro_angle = 0.0f;
+static int16_t g_gyro_paddle_y = PADDLE_START_Y;
+static uint32_t g_last_gyro_update = 0;
 
 void Gyro_Init(void) {
     uart_config_t config;
@@ -674,44 +675,31 @@ void Gyro_Init(void) {
 
     UART_Init(GYRO_UART, &config, CLOCK_GetFreq(GYRO_UART_CLKSRC));
 
-    // IMPORTANT: Dezactivează întreruperile (cheia succesului!)
-    UART_DisableInterrupts(GYRO_UART, kUART_RxDataRegFullInterruptEnable | kUART_RxOverrunInterruptEnable);
+    UART_DisableInterrupts(GYRO_UART,
+        kUART_RxDataRegFullInterruptEnable | kUART_RxOverrunInterruptEnable);
 
-    PRINTF("Gyroscope initialized (UART1, PTE0/PTE1)\r\n");
+    PRINTF("Gyroscope/ESP initialized (UART1, PTE0/PTE1)\r\n");
 }
 
-int16_t Map_Angle_To_Paddle(float angle) {
-    if (angle > 45.0f) angle = 45.0f;
-    if (angle < -45.0f) angle = -45.0f;
-
-    // Angle = -45 (Stanga/Jos) -> y = PADDLE_MAX_Y
-    // Angle = +45 (Dreapta/Sus) -> y = PADDLE_MIN_Y
-    float normalized = (angle + 45.0f) / 90.0f;
-    int16_t y = PADDLE_MAX_Y - (int16_t)(normalized * (PADDLE_MAX_Y - PADDLE_MIN_Y));
-
-    if (y < PADDLE_MIN_Y) y = PADDLE_MIN_Y;
-    if (y > PADDLE_MAX_Y) y = PADDLE_MAX_Y;
-
-    return y;
-}
-
+// ==> versiune aproape identica cu Check_UART_Data din codul care merge
 int Gyro_Check_UART_Data(void) {
     uint32_t flags = UART_GetStatusFlags(GYRO_UART);
 
     if (flags & (kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag)) {
-        UART_ClearStatusFlags(GYRO_UART, kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag);
-        g_gyro_rx_index = 0;  // RESET index la eroare (lipsea!)
+        UART_ClearStatusFlags(GYRO_UART,
+                              kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag);
+        g_gyro_rx_index = 0;
         return 0;
     }
 
-    // Citește TOȚI octeții disponibili (nu doar unul)
-    while (UART_GetStatusFlags(GYRO_UART) & kUART_RxDataRegFullFlag) {
+    if (flags & kUART_RxDataRegFullFlag) {
         uint8_t data = UART_ReadByte(GYRO_UART);
+
         if (data == '\n' || data == '\r') {
             if (g_gyro_rx_index > 0) {
                 g_gyro_rx_buffer[g_gyro_rx_index] = 0;
                 g_gyro_rx_index = 0;
-                return 1;
+                return 1;    // avem linie completă
             }
         } else {
             if (g_gyro_rx_index < GYRO_BUFFER_SIZE - 1) {
@@ -722,6 +710,34 @@ int Gyro_Check_UART_Data(void) {
     return 0;
 }
 
+// mapping adaptat la PADDLE_MIN_Y / MAX_Y din joc
+int16_t Map_Angle_To_Paddle(float angle) {
+    if (angle > 45.0f) angle = 45.0f;
+    if (angle < -45.0f) angle = -45.0f;
+
+    // -45 -> jos, +45 -> sus
+    float normalized = (angle + 45.0f) / 90.0f;   // [0..1]
+    int16_t y = PADDLE_MAX_Y - (int16_t)(normalized * (PADDLE_MAX_Y - PADDLE_MIN_Y));
+
+    if (y < PADDLE_MIN_Y) y = PADDLE_MIN_Y;
+    if (y > PADDLE_MAX_Y) y = PADDLE_MAX_Y;
+    return y;
+}
+
+// directia busolei, ca in codul tau
+const char* Gyro_GetCompassDir(float heading) {
+    if (heading >= 337.5 || heading < 22.5)  return "NORD";
+    if (heading >= 22.5  && heading < 67.5)  return "N-EST";
+    if (heading >= 67.5  && heading < 112.5) return "EST";
+    if (heading >= 112.5 && heading < 157.5) return "S-EST";
+    if (heading >= 157.5 && heading < 202.5) return "SUD";
+    if (heading >= 202.5 && heading < 247.5) return "S-VEST";
+    if (heading >= 247.5 && heading < 292.5) return "VEST";
+    if (heading >= 292.5 && heading < 337.5) return "N-VEST";
+    return "???";
+}
+
+// === EXACT ca Process_Data din codul mic, doar ca scriem in g_gyro_paddle_y
 void Gyro_Process_Data(char* input) {
     int ang = 0;
     int head = 0;
@@ -731,7 +747,6 @@ void Gyro_Process_Data(char* input) {
         *p1 = 0;
         ang = atoi(input);
 
-        // A doua virgula (care separa shot de busola)
         char* p2 = strchr(p1 + 1, ',');
         if (p2) {
             *p2 = 0;
@@ -740,10 +755,10 @@ void Gyro_Process_Data(char* input) {
     }
 
     g_gyro_angle = (float)ang;
+    float compassHeading = (float)head;
     g_gyro_paddle_y = Map_Angle_To_Paddle(g_gyro_angle);
     g_last_gyro_update = Timer_GetMs();
 
-    // Textul de directie (SUS/JOS)
     char directionStr[20];
     if (ang > 3) {
         strcpy(directionStr, "SUS (Dreapta)");
@@ -753,36 +768,16 @@ void Gyro_Process_Data(char* input) {
         strcpy(directionStr, "CENTRU");
     }
 
-    // Semnul (+ sau -)
     char semn = (ang >= 0) ? '+' : '-';
+    const char* compassDir = Gyro_GetCompassDir(compassHeading);
 
-    // Directia busolei
-    const char* compassDir;
-    float heading = (float)head;
-    if (heading >= 337.5 || heading < 22.5)  compassDir = "NORD";
-    else if (heading >= 22.5  && heading < 67.5)  compassDir = "N-EST";
-    else if (heading >= 67.5  && heading < 112.5) compassDir = "EST";
-    else if (heading >= 112.5 && heading < 157.5) compassDir = "S-EST";
-    else if (heading >= 157.5 && heading < 202.5) compassDir = "SUD";
-    else if (heading >= 202.5 && heading < 247.5) compassDir = "S-VEST";
-    else if (heading >= 247.5 && heading < 292.5) compassDir = "VEST";
-    else if (heading >= 292.5 && heading < 337.5) compassDir = "N-VEST";
-    else compassDir = "???";
-
-    // MESAJUL DE DEBUG IDENTIC CU CODUL TĂU
     PRINTF("Inclinatie: %c%d [%s] | Y: %d | Busola: %d (%s)\r\n",
            semn,
            abs(ang),
            directionStr,
-           g_gyro_paddle_y,  // Folosește paddle Y calculat pentru joc
+           g_gyro_paddle_y,
            head,
            compassDir);
-}
-
-void Gyro_Process(void) {
-    if (Gyro_Check_UART_Data()) {
-        Gyro_Process_Data(g_gyro_rx_buffer);
-    }
 }
 
 int16_t Gyro_GetPaddleY(void) {
@@ -792,6 +787,7 @@ int16_t Gyro_GetPaddleY(void) {
 bool Gyro_IsActive(void) {
     return (Timer_GetMs() - g_last_gyro_update) < 500;
 }
+
 
 /*============================================================================
  * FUNCTII AI / BOT
@@ -2083,11 +2079,14 @@ int main(void) {
 
         Joystick_Process();
 
+        if (Gyro_Check_UART_Data()) {
+			Gyro_Process_Data(g_gyro_rx_buffer);   // => PRINTF "Inclinatie: ..."
+		}
 
-		Gyro_Process();
 
 
         if (g_currentScreen == SCREEN_GAMEPLAY) {
+
             ProcessGameInput();
 
             if ((now - last_game_update) >= GAME_FRAME_MS) {
@@ -2129,7 +2128,7 @@ int main(void) {
             }
         }
 
-        __WFI();
+//        __WFI();
     }
 
     return 0;
