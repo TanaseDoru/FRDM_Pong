@@ -16,6 +16,7 @@
 #include "clock_config.h"
 #include "MKL25Z4.h"
 #include "fsl_debug_console.h"
+#include "fsl_uart.h"
 #include "fsl_adc16.h"
 #include "fsl_gpio.h"
 #include "fsl_port.h"
@@ -119,6 +120,11 @@ static GameState_t game;
 
 static int8_t g_p1_move = 0;
 static int8_t g_p2_move = 0;
+
+static float g_gyro_angle = 0.0f;
+static int16_t g_gyro_paddle_y = 0;
+static uint32_t g_last_gyro_update = 0;
+#define GYRO_UPDATE_MS 50
 
 /*============================================================================
  * CONSTANTE PENTRU JOC
@@ -257,6 +263,7 @@ const char* GetInputName(InputType_t input) {
     switch (input) {
         case INPUT_JOYSTICK:  return "Joystick";
         case INPUT_REMOTE:    return "Remote";
+        case INPUT_GYROSCOPE: return "Gyro";
         case INPUT_CPU_EASY:  return "CPU Easy";
         case INPUT_CPU_MEDIUM: return "CPU Med";
         case INPUT_CPU_HARD:  return "CPU Hard";
@@ -639,6 +646,152 @@ bool IR_IsPausePressed(void) {
 
     return pause_pressed;
 }
+/*============================================================================
+ * FUNCTII GYROSCOPE (UART)
+ *============================================================================*/
+
+#define GYRO_UART UART1
+#define GYRO_UART_CLKSRC kCLOCK_BusClk
+#define GYRO_BAUD_RATE 115200
+#define GYRO_BUFFER_SIZE 64
+
+static char g_gyro_rx_buffer[GYRO_BUFFER_SIZE];
+static uint8_t g_gyro_rx_index = 0;
+
+void Gyro_Init(void) {
+    uart_config_t config;
+
+    CLOCK_EnableClock(kCLOCK_PortE);
+    CLOCK_EnableClock(kCLOCK_Uart1);
+
+    PORT_SetPinMux(PORTE, 0U, kPORT_MuxAlt3); // PTE0 = TX
+    PORT_SetPinMux(PORTE, 1U, kPORT_MuxAlt3); // PTE1 = RX
+
+    UART_GetDefaultConfig(&config);
+    config.baudRate_Bps = GYRO_BAUD_RATE;
+    config.enableTx = true;
+    config.enableRx = true;
+
+    UART_Init(GYRO_UART, &config, CLOCK_GetFreq(GYRO_UART_CLKSRC));
+
+    // IMPORTANT: Dezactivează întreruperile (cheia succesului!)
+    UART_DisableInterrupts(GYRO_UART, kUART_RxDataRegFullInterruptEnable | kUART_RxOverrunInterruptEnable);
+
+    PRINTF("Gyroscope initialized (UART1, PTE0/PTE1)\r\n");
+}
+
+int16_t Map_Angle_To_Paddle(float angle) {
+    if (angle > 45.0f) angle = 45.0f;
+    if (angle < -45.0f) angle = -45.0f;
+
+    // Angle = -45 (Stanga/Jos) -> y = PADDLE_MAX_Y
+    // Angle = +45 (Dreapta/Sus) -> y = PADDLE_MIN_Y
+    float normalized = (angle + 45.0f) / 90.0f;
+    int16_t y = PADDLE_MAX_Y - (int16_t)(normalized * (PADDLE_MAX_Y - PADDLE_MIN_Y));
+
+    if (y < PADDLE_MIN_Y) y = PADDLE_MIN_Y;
+    if (y > PADDLE_MAX_Y) y = PADDLE_MAX_Y;
+
+    return y;
+}
+
+int Gyro_Check_UART_Data(void) {
+    uint32_t flags = UART_GetStatusFlags(GYRO_UART);
+
+    if (flags & (kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag)) {
+        UART_ClearStatusFlags(GYRO_UART, kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag);
+        g_gyro_rx_index = 0;  // RESET index la eroare (lipsea!)
+        return 0;
+    }
+
+    // Citește TOȚI octeții disponibili (nu doar unul)
+    while (UART_GetStatusFlags(GYRO_UART) & kUART_RxDataRegFullFlag) {
+        uint8_t data = UART_ReadByte(GYRO_UART);
+        if (data == '\n' || data == '\r') {
+            if (g_gyro_rx_index > 0) {
+                g_gyro_rx_buffer[g_gyro_rx_index] = 0;
+                g_gyro_rx_index = 0;
+                return 1;
+            }
+        } else {
+            if (g_gyro_rx_index < GYRO_BUFFER_SIZE - 1) {
+                g_gyro_rx_buffer[g_gyro_rx_index++] = data;
+            }
+        }
+    }
+    return 0;
+}
+
+void Gyro_Process_Data(char* input) {
+    int ang = 0;
+    int head = 0;
+
+    char* p1 = strchr(input, ',');
+    if (p1) {
+        *p1 = 0;
+        ang = atoi(input);
+
+        // A doua virgula (care separa shot de busola)
+        char* p2 = strchr(p1 + 1, ',');
+        if (p2) {
+            *p2 = 0;
+            head = atoi(p2 + 1);
+        }
+    }
+
+    g_gyro_angle = (float)ang;
+    g_gyro_paddle_y = Map_Angle_To_Paddle(g_gyro_angle);
+    g_last_gyro_update = Timer_GetMs();
+
+    // Textul de directie (SUS/JOS)
+    char directionStr[20];
+    if (ang > 3) {
+        strcpy(directionStr, "SUS (Dreapta)");
+    } else if (ang < -3) {
+        strcpy(directionStr, "JOS (Stanga)");
+    } else {
+        strcpy(directionStr, "CENTRU");
+    }
+
+    // Semnul (+ sau -)
+    char semn = (ang >= 0) ? '+' : '-';
+
+    // Directia busolei
+    const char* compassDir;
+    float heading = (float)head;
+    if (heading >= 337.5 || heading < 22.5)  compassDir = "NORD";
+    else if (heading >= 22.5  && heading < 67.5)  compassDir = "N-EST";
+    else if (heading >= 67.5  && heading < 112.5) compassDir = "EST";
+    else if (heading >= 112.5 && heading < 157.5) compassDir = "S-EST";
+    else if (heading >= 157.5 && heading < 202.5) compassDir = "SUD";
+    else if (heading >= 202.5 && heading < 247.5) compassDir = "S-VEST";
+    else if (heading >= 247.5 && heading < 292.5) compassDir = "VEST";
+    else if (heading >= 292.5 && heading < 337.5) compassDir = "N-VEST";
+    else compassDir = "???";
+
+    // MESAJUL DE DEBUG IDENTIC CU CODUL TĂU
+    PRINTF("Inclinatie: %c%d [%s] | Y: %d | Busola: %d (%s)\r\n",
+           semn,
+           abs(ang),
+           directionStr,
+           g_gyro_paddle_y,  // Folosește paddle Y calculat pentru joc
+           head,
+           compassDir);
+}
+
+void Gyro_Process(void) {
+    if (Gyro_Check_UART_Data()) {
+        Gyro_Process_Data(g_gyro_rx_buffer);
+    }
+}
+
+int16_t Gyro_GetPaddleY(void) {
+    return g_gyro_paddle_y;
+}
+
+bool Gyro_IsActive(void) {
+    return (Timer_GetMs() - g_last_gyro_update) < 500;
+}
 
 /*============================================================================
  * FUNCTII AI / BOT
@@ -774,10 +927,17 @@ void Game_Init(void) {
 
     IR_ResetGameState();
 
+    // ADAUGĂ ACEASTA SECȚIUNE:
+    // Inițializează giroscopul la poziția de start
+    if (g_player1_input == INPUT_GYROSCOPE || g_player2_input == INPUT_GYROSCOPE) {
+        g_gyro_paddle_y = PADDLE_START_Y;
+        g_gyro_angle = 0.0f;
+        g_last_gyro_update = Timer_GetMs();
+    }
+
     memset(&g_ui_timers, 0, sizeof(g_ui_timers));
     g_ui_timers.last_fps_print = Timer_GetMs();
 }
-
 void Game_DrawField(void) {
     uint32_t start = Timer_GetMs();
 
@@ -814,14 +974,22 @@ void Game_DrawPaddle(Paddle_t* paddle, int16_t x, uint16_t color) {
     uint32_t start = Timer_GetMs();
 
     if (paddle->y != paddle->prev_y) {
-        if (paddle->y > paddle->prev_y) {
-            int16_t clear_h = paddle->y - paddle->prev_y;
-            if (clear_h > PADDLE_HEIGHT) clear_h = PADDLE_HEIGHT;
-            ST7735_FillRect(x, paddle->prev_y, PADDLE_WIDTH, clear_h, COLOR_BLACK);
+        int16_t diff = abs(paddle->y - paddle->prev_y);
+
+        // Dacă diferența e prea mare (salt brusc de la giroscop), șterge tot
+        if (diff > PADDLE_HEIGHT) {
+            ST7735_FillRect(x, paddle->prev_y, PADDLE_WIDTH, PADDLE_HEIGHT, COLOR_BLACK);
         } else {
-            int16_t clear_h = paddle->prev_y - paddle->y;
-            if (clear_h > PADDLE_HEIGHT) clear_h = PADDLE_HEIGHT;
-            ST7735_FillRect(x, paddle->y + PADDLE_HEIGHT, PADDLE_WIDTH, clear_h, COLOR_BLACK);
+            // Mișcare normală - șterge doar diferența
+            if (paddle->y > paddle->prev_y) {
+                int16_t clear_h = paddle->y - paddle->prev_y;
+                if (clear_h > PADDLE_HEIGHT) clear_h = PADDLE_HEIGHT;
+                ST7735_FillRect(x, paddle->prev_y, PADDLE_WIDTH, clear_h, COLOR_BLACK);
+            } else {
+                int16_t clear_h = paddle->prev_y - paddle->y;
+                if (clear_h > PADDLE_HEIGHT) clear_h = PADDLE_HEIGHT;
+                ST7735_FillRect(x, paddle->y + PADDLE_HEIGHT, PADDLE_WIDTH, clear_h, COLOR_BLACK);
+            }
         }
     }
 
@@ -916,28 +1084,32 @@ void Game_Update(void) {
     }
 
     /* Paleta 1 (stanga) */
-    if (IsCPUInput(paddle1.input)) {
-        AI_UpdatePaddle(&paddle1, false);
-    } else if (paddle1.input == INPUT_JOYSTICK) {
-        int16_t joy_y = Joystick_GetY_Percent();
-        if (joy_y > 15) paddle1.y += (joy_y / 25);
-        else if (joy_y < -15) paddle1.y += (joy_y / 25);
-    } else if (paddle1.input == INPUT_REMOTE) {
-        int8_t ir_dir = IR_GetCurrentDirection();
-        paddle1.y += ir_dir * PADDLE_SPEED;
-    }
+        if (IsCPUInput(paddle1.input)) {
+            AI_UpdatePaddle(&paddle1, false);
+        } else if (paddle1.input == INPUT_JOYSTICK) {
+            int16_t joy_y = Joystick_GetY_Percent();
+            if (joy_y > 15) paddle1.y += (joy_y / 25);
+            else if (joy_y < -15) paddle1.y += (joy_y / 25);
+        } else if (paddle1.input == INPUT_REMOTE) {
+            int8_t ir_dir = IR_GetCurrentDirection();
+            paddle1.y += ir_dir * PADDLE_SPEED;
+        } else if (paddle1.input == INPUT_GYROSCOPE) {  // ADAUGĂ
+            paddle1.y = Gyro_GetPaddleY();
+        }
 
-    /* Paleta 2 (dreapta) */
-    if (IsCPUInput(paddle2.input)) {
-        AI_UpdatePaddle(&paddle2, true);
-    } else if (paddle2.input == INPUT_JOYSTICK) {
-        int16_t joy_y = Joystick_GetY_Percent();
-        if (joy_y > 15) paddle2.y += (joy_y / 25);
-        else if (joy_y < -15) paddle2.y += (joy_y / 25);
-    } else if (paddle2.input == INPUT_REMOTE) {
-        int8_t ir_dir = IR_GetCurrentDirection();
-        paddle2.y += ir_dir * PADDLE_SPEED;
-    }
+        /* Paleta 2 (dreapta) */
+        if (IsCPUInput(paddle2.input)) {
+            AI_UpdatePaddle(&paddle2, true);
+        } else if (paddle2.input == INPUT_JOYSTICK) {
+            int16_t joy_y = Joystick_GetY_Percent();
+            if (joy_y > 15) paddle2.y += (joy_y / 25);
+            else if (joy_y < -15) paddle2.y += (joy_y / 25);
+        } else if (paddle2.input == INPUT_REMOTE) {
+            int8_t ir_dir = IR_GetCurrentDirection();
+            paddle2.y += ir_dir * PADDLE_SPEED;
+        } else if (paddle2.input == INPUT_GYROSCOPE) {  // ADAUGĂ
+            paddle2.y = Gyro_GetPaddleY();
+        }
 
     /* Limiteaza pozitiile */
     if (paddle1.y < PADDLE_MIN_Y) paddle1.y = PADDLE_MIN_Y;
@@ -1179,9 +1351,8 @@ void DrawSelectP1Screen(void) {
 
     DrawInputMenuItem(0, INPUT_JOYSTICK, g_menuState.selectedIndex == 0, 1);
     DrawInputMenuItem(1, INPUT_REMOTE, g_menuState.selectedIndex == 1, 1);
-    DrawInputMenuItem(2, INPUT_CPU_EASY, g_menuState.selectedIndex == 2, 1);
-    DrawInputMenuItem(3, INPUT_CPU_HARD, g_menuState.selectedIndex == 3, 1);
-    DrawBackOption(4, g_menuState.selectedIndex == 4);
+    DrawInputMenuItem(2, INPUT_GYROSCOPE, g_menuState.selectedIndex == 2, 1);
+    DrawBackOption(3, g_menuState.selectedIndex == 3);
 }
 
 void DrawSelectP2Screen(void) {
@@ -1190,9 +1361,8 @@ void DrawSelectP2Screen(void) {
 
     DrawInputMenuItem(0, INPUT_JOYSTICK, g_menuState.selectedIndex == 0, 2);
     DrawInputMenuItem(1, INPUT_REMOTE, g_menuState.selectedIndex == 1, 2);
-    DrawInputMenuItem(2, INPUT_CPU_EASY, g_menuState.selectedIndex == 2, 2);
-    DrawInputMenuItem(3, INPUT_CPU_HARD, g_menuState.selectedIndex == 3, 2);
-    DrawBackOption(4, g_menuState.selectedIndex == 4);
+    DrawInputMenuItem(2, INPUT_GYROSCOPE, g_menuState.selectedIndex == 2, 2);
+    DrawBackOption(3, g_menuState.selectedIndex == 3);
 }
 
 void DrawDifficultyScreen(void) {
@@ -1621,11 +1791,11 @@ void DrawCurrentScreen(void) {
             DrawSelectInputScreen();
             break;
         case SCREEN_SELECT_P1:
-            g_menuState.maxItems = 5;
+            g_menuState.maxItems = 4;
             DrawSelectP1Screen();
             break;
         case SCREEN_SELECT_P2:
-            g_menuState.maxItems = 5;
+            g_menuState.maxItems = 4;
             DrawSelectP2Screen();
             break;
         case SCREEN_DIFFICULTY:
@@ -1708,10 +1878,10 @@ void Menu_Select(void) {
             break;
 
         case SCREEN_SELECT_P1:
-            if (g_menuState.selectedIndex == 4) {
+            if (g_menuState.selectedIndex == 3) {
                 ChangeScreen(SCREEN_SELECT_INPUT);
             } else {
-                InputType_t inputMap[] = {INPUT_JOYSTICK, INPUT_REMOTE, INPUT_CPU_EASY, INPUT_CPU_HARD};
+                InputType_t inputMap[] = {INPUT_JOYSTICK, INPUT_REMOTE, INPUT_GYROSCOPE};
                 InputType_t selectedInput = inputMap[g_menuState.selectedIndex];
 
                 if (IsInputAvailable(selectedInput, 1)) {
@@ -1730,10 +1900,10 @@ void Menu_Select(void) {
             break;
 
         case SCREEN_SELECT_P2:
-            if (g_menuState.selectedIndex == 4) {
+            if (g_menuState.selectedIndex == 3) {
                 ChangeScreen(SCREEN_SELECT_INPUT);
             } else {
-                InputType_t inputMap[] = {INPUT_JOYSTICK, INPUT_REMOTE, INPUT_CPU_EASY, INPUT_CPU_HARD};
+            	InputType_t inputMap[] = {INPUT_JOYSTICK, INPUT_REMOTE, INPUT_GYROSCOPE};
                 InputType_t selectedInput = inputMap[g_menuState.selectedIndex];
 
                 if (IsInputAvailable(selectedInput, 2)) {
@@ -1888,6 +2058,10 @@ int main(void) {
     TPM0_Init();
     PRINTF("IR Remote OK!\r\n\r\n");
 
+    PRINTF("Initializing Gyroscope...\r\n");
+	Gyro_Init();
+	PRINTF("Gyroscope OK!\r\n\r\n");
+
     PRINTF("=== CONTROLS ===\r\n");
     PRINTF("MENU: Joystick/IR UP/DOWN + Button/OK=Select\r\n");
     PRINTF("GAME: Joystick/IR UP/DOWN = Move paddle\r\n");
@@ -1908,6 +2082,10 @@ int main(void) {
         uint32_t now = Timer_GetMs();
 
         Joystick_Process();
+
+
+		Gyro_Process();
+
 
         if (g_currentScreen == SCREEN_GAMEPLAY) {
             ProcessGameInput();

@@ -19,6 +19,7 @@ source/MKL25Z4_Display_My_test.o source/MKL25Z4_Display_My_test.d: \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\board/clock_config.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/MKL25Z4.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\utilities/fsl_debug_console.h \
+ C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_uart.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_adc16.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h \
  ../source/st7735_simple.h
@@ -41,6 +42,7 @@ C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\board/clock_config.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/MKL25Z4.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\utilities/fsl_debug_console.h:
+C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_uart.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_adc16.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:
 ../source/st7735_simple.h:
