@@ -1103,9 +1103,34 @@ void Game_Update(void) {
         } else if (paddle2.input == INPUT_REMOTE) {
             int8_t ir_dir = IR_GetCurrentDirection();
             paddle2.y += ir_dir * PADDLE_SPEED;
-        } else if (paddle2.input == INPUT_GYROSCOPE) {  // ADAUGĂ
-            paddle2.y = Gyro_GetPaddleY();
+        } else if (paddle2.input == INPUT_GYROSCOPE) {
+            int16_t target = Gyro_GetPaddleY();
+
+            // opțional: ignoră dacă nu avem date recente (de exemplu senzor mort)
+            if (!Gyro_IsActive()) {
+                // nu schimba paleta daca giroscopul nu a mai trimis nimic
+                // (sau eventual du-o încet spre centru)
+                // return;   // cel mai simplu: lasa paleta unde e
+            }
+
+            int16_t dy = target - paddle2.y;
+
+            // dacă diferența e mică, nu mai mișcăm (evită tremuratul fin)
+            if (dy > -2 && dy < 2) {
+                // nu face nimic, păstrăm poziția curentă
+            } else {
+                // limitați viteza paletei (de ex. max 3 pixeli pe frame)
+                int16_t step = 3;
+                if (dy > 0) {
+                    if (dy < step) step = dy;
+                    paddle2.y += step;
+                } else {
+                    if (-dy < step) step = -dy;
+                    paddle2.y -= step;
+                }
+            }
         }
+
 
     /* Limiteaza pozitiile */
     if (paddle1.y < PADDLE_MIN_Y) paddle1.y = PADDLE_MIN_Y;
