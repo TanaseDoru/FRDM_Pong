@@ -12,6 +12,7 @@ C_SRCS += \
 ../drivers/fsl_lpsci.c \
 ../drivers/fsl_smc.c \
 ../drivers/fsl_spi.c \
+../drivers/fsl_tpm.c \
 ../drivers/fsl_uart.c 
 
 C_DEPS += \
@@ -23,6 +24,7 @@ C_DEPS += \
 ./drivers/fsl_lpsci.d \
 ./drivers/fsl_smc.d \
 ./drivers/fsl_spi.d \
+./drivers/fsl_tpm.d \
 ./drivers/fsl_uart.d 
 
 OBJS += \
@@ -34,6 +36,7 @@ OBJS += \
 ./drivers/fsl_lpsci.o \
 ./drivers/fsl_smc.o \
 ./drivers/fsl_spi.o \
+./drivers/fsl_tpm.o \
 ./drivers/fsl_uart.o 
 
 
@@ -41,7 +44,7 @@ OBJS += \
 drivers/%.o: ../drivers/%.c drivers/subdir.mk
 	@echo 'Building file: $<'
 	@echo 'Invoking: MCU C Compiler'
-	arm-none-eabi-gcc -D__REDLIB__ -DCPU_MKL25Z128VLK4 -DCPU_MKL25Z128VLK4_cm0plus -DSDK_OS_BAREMETAL -DFSL_RTOS_BM -DSDK_DEBUGCONSOLE=1 -DCR_INTEGER_PRINTF -DPRINTF_FLOAT_ENABLE=0 -D__MCUXPRESSO -D__USE_CMSIS -DDEBUG -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\board" -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\source" -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test" -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers" -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\startup" -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\utilities" -I"C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS" -O0 -fno-common -g3 -gdwarf-4 -Wall -c -fmessage-length=0 -fno-builtin -ffunction-sections -fdata-sections -fmerge-constants -fmacro-prefix-map="$(<D)/"= -mcpu=cortex-m0plus -mthumb -D__REDLIB__ -fstack-usage -specs=redlib.specs -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.o)" -MT"$(@:%.o=%.d)" -o "$@" "$<"
+	arm-none-eabi-gcc -D__REDLIB__ -DCPU_MKL25Z128VLK4 -DCPU_MKL25Z128VLK4_cm0plus -DSDK_OS_BAREMETAL -DFSL_RTOS_BM -DSDK_DEBUGCONSOLE=1 -DCR_INTEGER_PRINTF -DPRINTF_FLOAT_ENABLE=0 -D__MCUXPRESSO -D__USE_CMSIS -DDEBUG -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers" -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\board" -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\CMSIS" -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\utilities" -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\source" -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test" -I"C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\startup" -O0 -fno-common -g3 -gdwarf-4 -Wall -c -fmessage-length=0 -fno-builtin -ffunction-sections -fdata-sections -fmerge-constants -fmacro-prefix-map="$(<D)/"= -mcpu=cortex-m0plus -mthumb -D__REDLIB__ -fstack-usage -specs=redlib.specs -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@:%.o=%.o)" -MT"$(@:%.o=%.d)" -o "$@" "$<"
 	@echo 'Finished building: $<'
 	@echo ' '
 
@@ -49,7 +52,7 @@ drivers/%.o: ../drivers/%.c drivers/subdir.mk
 clean: clean-drivers
 
 clean-drivers:
-	-$(RM) ./drivers/fsl_adc16.d ./drivers/fsl_adc16.o ./drivers/fsl_clock.d ./drivers/fsl_clock.o ./drivers/fsl_common.d ./drivers/fsl_common.o ./drivers/fsl_flash.d ./drivers/fsl_flash.o ./drivers/fsl_gpio.d ./drivers/fsl_gpio.o ./drivers/fsl_lpsci.d ./drivers/fsl_lpsci.o ./drivers/fsl_smc.d ./drivers/fsl_smc.o ./drivers/fsl_spi.d ./drivers/fsl_spi.o ./drivers/fsl_uart.d ./drivers/fsl_uart.o
+	-$(RM) ./drivers/fsl_adc16.d ./drivers/fsl_adc16.o ./drivers/fsl_clock.d ./drivers/fsl_clock.o ./drivers/fsl_common.d ./drivers/fsl_common.o ./drivers/fsl_flash.d ./drivers/fsl_flash.o ./drivers/fsl_gpio.d ./drivers/fsl_gpio.o ./drivers/fsl_lpsci.d ./drivers/fsl_lpsci.o ./drivers/fsl_smc.d ./drivers/fsl_smc.o ./drivers/fsl_spi.d ./drivers/fsl_spi.o ./drivers/fsl_tpm.d ./drivers/fsl_tpm.o ./drivers/fsl_uart.d ./drivers/fsl_uart.o
 
 .PHONY: clean-drivers
 

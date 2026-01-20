@@ -20,6 +20,7 @@
 #include "fsl_adc16.h"
 #include "fsl_gpio.h"
 #include "fsl_port.h"
+#include "fsl_tpm.h"
 #include "st7735_simple.h"
 
 /*============================================================================
@@ -167,6 +168,57 @@ static int16_t g_joy_y_percent = 0;
 static bool g_joy_action_consumed = false;
 
 /*============================================================================
+ * CONFIGURARE LED-URI ARCADE (2 LED-uri externe)
+ *============================================================================*/
+
+// LED Player 1 - PTE20 (LED extern CYAN/ALBASTRU)
+#define LED_P1_GPIO      GPIOE
+#define LED_P1_PORT      PORTE
+#define LED_P1_PIN       20U
+
+// LED Player 2 - PTE21 (LED extern ROSU/MAGENTA)
+#define LED_P2_GPIO      GPIOE
+#define LED_P2_PORT      PORTE
+#define LED_P2_PIN       21U
+
+// Macro-uri control LED (Active LOW - LED conectat intre pin si VCC prin rezistor)
+#define LED_P1_ON()      GPIO_ClearPinsOutput(LED_P1_GPIO, 1U << LED_P1_PIN)
+#define LED_P1_OFF()     GPIO_SetPinsOutput(LED_P1_GPIO, 1U << LED_P1_PIN)
+#define LED_P1_TOGGLE()  GPIO_TogglePinsOutput(LED_P1_GPIO, 1U << LED_P1_PIN)
+
+#define LED_P2_ON()      GPIO_ClearPinsOutput(LED_P2_GPIO, 1U << LED_P2_PIN)
+#define LED_P2_OFF()     GPIO_SetPinsOutput(LED_P2_GPIO, 1U << LED_P2_PIN)
+#define LED_P2_TOGGLE()  GPIO_TogglePinsOutput(LED_P2_GPIO, 1U << LED_P2_PIN)
+
+// Macro-uri pentru ambele LED-uri
+#define LEDS_BOTH_ON()   do { LED_P1_ON(); LED_P2_ON(); } while(0)
+#define LEDS_BOTH_OFF()  do { LED_P1_OFF(); LED_P2_OFF(); } while(0)
+
+/*============================================================================
+ * CONFIGURARE BUZZER PIEZO (TPM2_CH0 pe PTB2)
+ *============================================================================*/
+
+#define BUZZER_PORT      PORTB
+#define BUZZER_PIN       2U
+#define BUZZER_TPM       TPM2
+#define BUZZER_CHANNEL   0U
+
+// Frecvente note muzicale (Hz) - pentru melodia "The Metro" in B minor
+// Frecvente note muzicale (Hz) - TEST frecvente joase
+#define NOTE_B2   150   // Foarte grav
+#define NOTE_C3   160
+#define NOTE_D3   170
+#define NOTE_E2   130
+#define NOTE_FS2  140
+#define NOTE_G2   145
+#define NOTE_A2   155
+#define NOTE_B3   180
+#define NOTE_REST 0
+
+// Variabila globala pentru starea sunetului
+static volatile uint8_t g_sound_enabled = 1;
+
+/*============================================================================
  * CONFIGURARE IR REMOTE
  *============================================================================*/
 
@@ -250,6 +302,270 @@ void delay_ms(uint32_t ms) {
 
 bool Timer_Elapsed(uint32_t start_time, uint32_t duration_ms) {
     return ((g_systick_ms - start_time) >= duration_ms);
+}
+
+/*============================================================================
+ * FUNCTII LED ARCADE
+ *============================================================================*/
+
+void LED_Arcade_Init(void) {
+    // Enable clock pentru PORTE
+    CLOCK_EnableClock(kCLOCK_PortE);
+
+    // Configurare pini ca GPIO output
+    PORT_SetPinMux(LED_P1_PORT, LED_P1_PIN, kPORT_MuxAsGpio);
+    PORT_SetPinMux(LED_P2_PORT, LED_P2_PIN, kPORT_MuxAsGpio);
+
+    // Configurare ca output, initial OFF (HIGH pentru active-low)
+    gpio_pin_config_t led_config = {kGPIO_DigitalOutput, 1};
+    GPIO_PinInit(LED_P1_GPIO, LED_P1_PIN, &led_config);
+    GPIO_PinInit(LED_P2_GPIO, LED_P2_PIN, &led_config);
+
+    // Test flash la startup - confirma ca LED-urile functioneaza
+    LED_P1_ON(); LED_P2_ON();
+    delay_ms(150);
+    LED_P1_OFF(); LED_P2_OFF();
+    delay_ms(100);
+    LED_P1_ON(); LED_P2_ON();
+    delay_ms(150);
+    LED_P1_OFF(); LED_P2_OFF();
+
+    PRINTF("LED Arcade initialized (P1=PTE20, P2=PTE21)\r\n");
+}
+
+// Flash pentru gol - numarul de flash-uri = scorul jucatorului
+void LED_GoalFlash(uint8_t player, uint8_t score) {
+    for (uint8_t i = 0; i < score; i++) {
+        if (player == 1) {
+            LED_P1_ON();
+        } else {
+            LED_P2_ON();
+        }
+        delay_ms(100);
+        if (player == 1) {
+            LED_P1_OFF();
+        } else {
+            LED_P2_OFF();
+        }
+        delay_ms(80);
+    }
+}
+
+// Flash pentru ambele LED-uri simultan
+void LED_BothFlash(uint8_t times, uint16_t on_ms, uint16_t off_ms) {
+    for (uint8_t i = 0; i < times; i++) {
+        LEDS_BOTH_ON();
+        delay_ms(on_ms);
+        LEDS_BOTH_OFF();
+        delay_ms(off_ms);
+    }
+}
+
+// Flash alternativ intre cele 2 LED-uri (celebration effect)
+void LED_AlternatingFlash(uint8_t times, uint16_t period_ms) {
+    for (uint8_t i = 0; i < times; i++) {
+        LED_P1_ON(); LED_P2_OFF();
+        delay_ms(period_ms);
+        LED_P1_OFF(); LED_P2_ON();
+        delay_ms(period_ms);
+    }
+    LED_P2_OFF();
+}
+
+// Victory pulse pentru castigator - pulsuri lente
+void LED_VictoryPulse(uint8_t winner) {
+    for (uint8_t i = 0; i < 5; i++) {
+        if (winner == 1) {
+            LED_P1_ON();
+        } else {
+            LED_P2_ON();
+        }
+        delay_ms(200);
+        if (winner == 1) {
+            LED_P1_OFF();
+        } else {
+            LED_P2_OFF();
+        }
+        delay_ms(150);
+    }
+}
+
+/*============================================================================
+ * FUNCTII BUZZER PIEZO
+ *============================================================================*/
+
+void Buzzer_Init(void) {
+    // Enable clock pentru PORTB si TPM2
+    CLOCK_EnableClock(kCLOCK_PortB);
+    CLOCK_EnableClock(kCLOCK_Tpm2);
+
+    // Configureaza PTB2 ca TPM2_CH0 (ALT3)
+    PORT_SetPinMux(BUZZER_PORT, BUZZER_PIN, kPORT_MuxAlt3);
+
+    // Configureaza sursa clock pentru TPM2
+    CLOCK_SetTpmClock(1U);  // MCGFLLCLK sau MCGPLLCLK/2
+
+    // Reset TPM2
+    BUZZER_TPM->SC = 0;
+    BUZZER_TPM->CNT = 0;
+    BUZZER_TPM->MOD = 0xFFFF;
+
+    // Configureaza canalul 0 pentru PWM edge-aligned, high-true
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnSC = TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;  // Duty cycle 0 (off)
+
+    // Porneste TPM2 cu prescaler 1 (48MHz / 1 = 48MHz)
+    BUZZER_TPM->SC = TPM_SC_CMOD(1) | TPM_SC_PS(0);
+
+    PRINTF("Buzzer initialized (PTB2, TPM2_CH0)\r\n");
+}
+
+void Buzzer_Tone(uint16_t frequency, uint16_t duration_ms) {
+    if (!g_sound_enabled || frequency == 0) {
+        // Pauza sau sunet dezactivat
+        BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;
+        if (duration_ms > 0) {
+            delay_ms(duration_ms);
+        }
+        return;
+    }
+
+    // Calculeaza MOD pentru frecventa dorita
+    // Clock TPM = 48MHz, frecventa = 48MHz / (MOD + 1)
+    // MOD = (48MHz / frecventa) - 1
+    uint32_t mod_value = (48000000U / frequency) - 1;
+    if (mod_value > 0xFFFF) mod_value = 0xFFFF;
+
+    BUZZER_TPM->CNT = 0;
+    BUZZER_TPM->MOD = mod_value;
+
+    // Duty cycle 50% pentru sunet puternic
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = mod_value / 2;
+
+    if (duration_ms > 0) {
+        delay_ms(duration_ms);
+        // Opreste sunetul dupa durata
+        BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;
+    }
+}
+
+void Buzzer_Off(void) {
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;
+}
+
+void Buzzer_SetEnabled(uint8_t enabled) {
+    g_sound_enabled = enabled;
+    if (!enabled) {
+        Buzzer_Off();
+    }
+}
+
+// Structura pentru o nota muzicala
+typedef struct {
+    uint16_t frequency;
+    uint16_t duration_ms;
+} Note_t;
+
+// Melodia "The Metro" - Berlin (Intro in B minor)
+// Tempo ~120 BPM, 0.5 beat = 250ms, dar vom folosi 150ms pentru arcade feel
+static const Note_t metro_melody[] = {
+    // Intro - B2 repetat (beat 1-8.5) - note grave
+    {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200},
+    {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200},
+
+    // Pattern principal - note grave, tempo mai lent
+    {NOTE_E2, 200}, {NOTE_E2, 200},      // beat 9
+    {NOTE_B3, 200}, {NOTE_B3, 200},      // beat 10
+    {NOTE_FS2, 200}, {NOTE_FS2, 200},    // beat 11
+    {NOTE_G2, 200}, {NOTE_G2, 200},      // beat 12
+    {NOTE_D3, 200}, {NOTE_D3, 200},      // beat 13
+    {NOTE_A2, 200}, {NOTE_A2, 200},      // beat 14
+    {NOTE_C3, 200}, {NOTE_C3, 200},      // beat 15
+    {NOTE_B3, 200}, {NOTE_B3, 200},      // beat 16
+
+    // Repetare pattern
+    {NOTE_E2, 200}, {NOTE_E2, 200},
+    {NOTE_B3, 200}, {NOTE_B3, 200},
+    {NOTE_FS2, 200}, {NOTE_FS2, 200},
+    {NOTE_G2, 200}, {NOTE_G2, 200},
+    {NOTE_D3, 200}, {NOTE_D3, 200},
+    {NOTE_A2, 200}, {NOTE_A2, 200},
+    {NOTE_C3, 200}, {NOTE_C3, 200},
+    {NOTE_B3, 200}, {NOTE_B3, 200},
+
+    {NOTE_REST, 0}  // End marker
+};
+
+#define METRO_MELODY_LENGTH (sizeof(metro_melody) / sizeof(metro_melody[0]) - 1)
+
+// Variabile pentru redare melodie in background
+static volatile uint16_t g_melody_index = 0;
+static volatile uint8_t g_melody_playing = 0;
+
+void Buzzer_PlayMelodyBlocking(void) {
+    if (!g_sound_enabled) return;
+
+    for (uint16_t i = 0; i < METRO_MELODY_LENGTH; i++) {
+        if (metro_melody[i].frequency == NOTE_REST) break;
+        Buzzer_Tone(metro_melody[i].frequency, metro_melody[i].duration_ms);
+        delay_ms(20);  // Mica pauza intre note pentru articulare
+    }
+    Buzzer_Off();
+}
+
+// Reda o singura nota din melodie (pentru redare non-blocking in intro)
+void Buzzer_PlayNextNote(void) {
+    if (!g_sound_enabled || !g_melody_playing) return;
+
+    if (g_melody_index >= METRO_MELODY_LENGTH ||
+        metro_melody[g_melody_index].frequency == NOTE_REST) {
+        g_melody_index = 0;  // Loop melodia
+    }
+
+    Buzzer_Tone(metro_melody[g_melody_index].frequency, 0);  // Start tone fara delay
+    g_melody_index++;
+}
+
+void Buzzer_StartMelody(void) {
+    g_melody_index = 0;
+    g_melody_playing = 1;
+}
+
+void Buzzer_StopMelody(void) {
+    g_melody_playing = 0;
+    Buzzer_Off();
+}
+
+// Efect sonor pentru gol
+void Buzzer_GoalSound(void) {
+    if (!g_sound_enabled) return;
+
+    // Sunet ascendent de celebrare
+    Buzzer_Tone(330, 80);   // E4
+    Buzzer_Tone(392, 80);   // G4
+    Buzzer_Tone(523, 80);   // C5
+    Buzzer_Tone(659, 150);  // E5
+    Buzzer_Off();
+}
+
+// Efect sonor pentru start joc
+void Buzzer_StartSound(void) {
+    if (!g_sound_enabled) return;
+
+    Buzzer_Tone(440, 150);  // A4
+    delay_ms(50);
+    Buzzer_Tone(880, 200);  // A5
+    Buzzer_Off();
+}
+
+// Efect sonor pentru game over
+void Buzzer_GameOverSound(void) {
+    if (!g_sound_enabled) return;
+
+    Buzzer_Tone(392, 200);  // G4
+    Buzzer_Tone(330, 200);  // E4
+    Buzzer_Tone(262, 400);  // C4
+    Buzzer_Off();
 }
 
 /*============================================================================
@@ -1174,9 +1490,11 @@ void Game_Update(void) {
         }
     }
 
-    /* Gol stanga */
+    /* Gol stanga - Player 2 marcheaza */
     if (ball.x < -ball.size) {
         paddle2.score++;
+        LED_GoalFlash(2, paddle2.score);  // Flash-uri = scorul P2
+        Buzzer_GoalSound();  // Sunet gol
         Game_DrawScore();
         if (paddle2.score >= game.winning_score) {
             game.winner = 2;
@@ -1186,9 +1504,11 @@ void Game_Update(void) {
         }
     }
 
-    /* Gol dreapta */
+    /* Gol dreapta - Player 1 marcheaza */
     if (ball.x > FIELD_WIDTH + ball.size) {
         paddle1.score++;
+        LED_GoalFlash(1, paddle1.score);  // Flash-uri = scorul P1
+        Buzzer_GoalSound();  // Sunet gol
         Game_DrawScore();
         if (paddle1.score >= game.winning_score) {
             game.winner = 1;
@@ -1217,31 +1537,48 @@ void Game_Start(void) {
     ST7735_FillRect(PADDLE_X_P1, paddle1.y, PADDLE_WIDTH, PADDLE_HEIGHT, COLOR_CYAN);
     ST7735_FillRect(PADDLE_X_P2, paddle2.y, PADDLE_WIDTH, PADDLE_HEIGHT, COLOR_MAGENTA);
 
-    /* Countdown */
+    /* === COUNTDOWN CU LED-URI ARCADE === */
+
+    // READY - ambele LED-uri ON
     ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
     ST7735_DrawRect(40, 50, 80, 30, COLOR_YELLOW);
     ST7735_DrawStringCentered(58, "READY", COLOR_YELLOW, COLOR_DARK_GRAY, 2);
+    LEDS_BOTH_ON();
     delay_ms(700);
 
+    // 3 - LED P1 flash
     ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
     ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
     ST7735_DrawStringCentered(58, "3", COLOR_WHITE, COLOR_DARK_GRAY, 2);
+    LEDS_BOTH_OFF();
+    LED_P1_ON();
     delay_ms(400);
 
+    // 2 - LED P2 flash
     ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
     ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
     ST7735_DrawStringCentered(58, "2", COLOR_WHITE, COLOR_DARK_GRAY, 2);
+    LED_P1_OFF();
+    LED_P2_ON();
     delay_ms(400);
 
+    // 1 - LED P1 flash
     ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
     ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
     ST7735_DrawStringCentered(58, "1", COLOR_WHITE, COLOR_DARK_GRAY, 2);
+    LED_P2_OFF();
+    LED_P1_ON();
     delay_ms(400);
 
+    // GO! - ambele flash rapid + sunet start
     ST7735_FillRect(40, 50, 80, 30, COLOR_GREEN);
     ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
     ST7735_DrawStringCentered(58, "GO!", COLOR_WHITE, COLOR_GREEN, 2);
-    delay_ms(500);
+    LED_P1_OFF();
+    LEDS_BOTH_ON();
+    Buzzer_StartSound();  // Sunet start joc
+    LEDS_BOTH_OFF();
+    delay_ms(200);
 
     ST7735_FillRect(40, 50, 80, 30, COLOR_BLACK);
     Game_RedrawCenterLine();
@@ -1319,6 +1656,9 @@ void DrawBackOption(uint8_t index, bool selected) {
 void DrawMainScreen(void) {
     uint32_t start = Timer_GetMs();
 
+    // Opreste LED-urile cand suntem in meniul principal
+    LEDS_BOTH_OFF();
+
     ST7735_FillScreen(COLOR_BG);
     DrawTitle("PONG GAME");
 
@@ -1348,6 +1688,9 @@ void DrawStartScreen(void) {
 }
 
 void DrawSelectInputScreen(void) {
+    // Opreste LED-urile cand ne intoarcem la select input
+    LEDS_BOTH_OFF();
+
     ST7735_FillScreen(COLOR_BG);
     DrawTitle("SELECT INPUT");
 
@@ -1367,6 +1710,10 @@ void DrawSelectInputScreen(void) {
 }
 
 void DrawSelectP1Screen(void) {
+    // LED P2 ON cand selectam pentru Player 1 (inversat)
+    LED_P1_OFF();
+    LED_P2_ON();
+
     ST7735_FillScreen(COLOR_BG);
     DrawTitle("PLAYER 1");
 
@@ -1377,6 +1724,10 @@ void DrawSelectP1Screen(void) {
 }
 
 void DrawSelectP2Screen(void) {
+    // LED P1 ON cand selectam pentru Player 2 (inversat)
+    LED_P2_OFF();
+    LED_P1_ON();
+
     ST7735_FillScreen(COLOR_BG);
     DrawTitle("PLAYER 2");
 
@@ -1413,6 +1764,11 @@ void DrawDifficultyScreen(void) {
 }
 
 void DrawGameOverScreen(void) {
+    // === LED CELEBRATION + SUNET la Game Over ===
+    Buzzer_GameOverSound();         // Sunet game over
+    LED_AlternatingFlash(5, 120);   // Flash alternativ rapid
+    LED_VictoryPulse(game.winner);  // Pulsuri pentru castigator
+
     ST7735_FillScreen(COLOR_BG);
 
     ST7735_DrawStringCentered(15, "GAME OVER", COLOR_RED, COLOR_BG, 2);
@@ -1527,13 +1883,22 @@ void PlayIntroAnimation(void) {
     const int16_t DEMO_TOP = 66;
     const int16_t DEMO_BOTTOM = 102;
     uint32_t anim_start;
+    uint32_t last_note_time = 0;
+    uint16_t note_index = 0;
+
+    /* === LED-uri la start intro === */
+    LED_BothFlash(2, 100, 100);
+
+    /* === Porneste melodia "The Metro" === */
+    PRINTF("Playing intro melody...\r\n");
 
     /* Faza BMO */
     ST7735_FillScreen(BMO_SCREEN_COLOR);
     delay_ms(300);
 
     DrawBMOFace(0, 0);
-    delay_ms(500);
+    LED_BothFlash(1, 80, 0);  // Flash la aparitia BMO
+    delay_ms(420);
 
     DrawBMOFace(0, 1);
     delay_ms(150);
@@ -1569,8 +1934,10 @@ void PlayIntroAnimation(void) {
 
     for (int i = 0; i < 3; i++) {
         ST7735_FillScreen(COLOR_WHITE);
+        LEDS_BOTH_ON();  // LED flash sincronizat cu ecranul
         delay_ms(50);
         ST7735_FillScreen(BMO_SCREEN_COLOR);
+        LEDS_BOTH_OFF();
         DrawBMOFace(1, 0);
         ST7735_DrawStringCentered(100, "Let's play", COLOR_BLACK, BMO_SCREEN_COLOR, 1);
         ST7735_DrawStringCentered(112, "PONG!", COLOR_YELLOW, BMO_SCREEN_COLOR, 2);
@@ -1581,21 +1948,31 @@ void PlayIntroAnimation(void) {
 
     anim_start = Timer_GetMs();
 
+    /* Rainbow scanlines cu LED-uri pulsand */
     for (int16_t y = 0; y < 128; y += 2) {
         uint16_t scan_color = rainbow_colors[y % NUM_RAINBOW_COLORS];
         ST7735_DrawHLine(0, y, 160, scan_color);
+        // LED-uri alternand in timpul scanlines
+        if (y % 16 == 0) LED_P1_TOGGLE();
+        if (y % 16 == 8) LED_P2_TOGGLE();
         delay_ms(8);
     }
+    LEDS_BOTH_OFF();
     delay_ms(100);
 
+    /* Flash de culori cu LED-uri sincronizate */
     ST7735_FillScreen(COLOR_CYAN);
+    LED_P1_ON();
     delay_ms(40);
     ST7735_FillScreen(COLOR_MAGENTA);
+    LED_P1_OFF(); LED_P2_ON();
     delay_ms(40);
     ST7735_FillScreen(COLOR_YELLOW);
+    LEDS_BOTH_ON();
     delay_ms(40);
     ST7735_FillScreen(COLOR_WHITE);
     delay_ms(60);
+    LEDS_BOTH_OFF();
 
     for (int16_t y = 0; y < 128; y++) {
         uint8_t intensity = 10 + (y / 8);
@@ -1633,17 +2010,21 @@ void PlayIntroAnimation(void) {
         }
     }
 
+    /* Flash titlu PONG cu LED-uri */
     for (int flash = 0; flash < 3; flash++) {
         for (int i = 0; i < 4; i++) {
             ST7735_DrawChar(letter_x[i], 15, letters[i],
                            rainbow_colors[(flash + i) % NUM_RAINBOW_COLORS], COLOR_BLACK, TITLE_SIZE);
         }
+        LED_P1_TOGGLE(); LED_P2_TOGGLE();  // LED-uri alternand cu titlul
         delay_ms(80);
     }
+    LEDS_BOTH_OFF();
 
     for (int i = 0; i < 4; i++) {
         ST7735_DrawChar(letter_x[i], 15, letters[i], letter_colors[i], COLOR_BLACK, TITLE_SIZE);
     }
+    LED_BothFlash(2, 50, 50);  // Flash final la titlu complet
 
     for (int16_t w = 0; w <= 70; w += 3) {
         ST7735_DrawHLine(80 - w, 42, w * 2, COLOR_WHITE);
@@ -1693,6 +2074,17 @@ void PlayIntroAnimation(void) {
     while (!g_joy_btn_pressed && !IR_IsPausePressed()) {
         uint32_t now = Timer_GetMs();
 
+        /* === Reda melodia "The Metro" in timpul demo-ului === */
+        if ((now - last_note_time) >= 120) {  // O nota la fiecare 120ms
+            last_note_time = now;
+            if (note_index < METRO_MELODY_LENGTH && metro_melody[note_index].frequency != NOTE_REST) {
+                Buzzer_Tone(metro_melody[note_index].frequency, 0);  // Start nota fara delay
+                note_index++;
+            } else {
+                note_index = 0;  // Loop melodia
+            }
+        }
+
         ST7735_FillRect(ball_x, ball_y, BALL_SZ, BALL_SZ, COLOR_BLACK);
 
         ball_x += ball_dx;
@@ -1705,11 +2097,13 @@ void PlayIntroAnimation(void) {
             ball_dx = -ball_dx;
             ball_x = 13;
             ST7735_FillRect(8, p1_y, PAD_W, PAD_H, COLOR_WHITE);
+            LED_P1_ON();  // LED P1 flash la coliziune demo
         }
         if (ball_x >= 148 - BALL_SZ && ball_y + BALL_SZ >= p2_y && ball_y <= p2_y + PAD_H) {
             ball_dx = -ball_dx;
             ball_x = 147 - BALL_SZ;
             ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_WHITE);
+            LED_P2_ON();  // LED P2 flash la coliziune demo
         }
 
         if (ball_x < 5 || ball_x > 155) {
@@ -1724,6 +2118,7 @@ void PlayIntroAnimation(void) {
         if (p1_y < DEMO_TOP) p1_y = DEMO_TOP;
         if (p1_y > DEMO_BOTTOM - PAD_H) p1_y = DEMO_BOTTOM - PAD_H;
         ST7735_FillRect(8, p1_y, PAD_W, PAD_H, COLOR_CYAN);
+        LED_P1_OFF();  // Opreste LED dupa redraw paleta
 
         ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_BLACK);
         if (ball_y > p2_y + PAD_H/2) p2_y += 2;
@@ -1731,6 +2126,7 @@ void PlayIntroAnimation(void) {
         if (p2_y < DEMO_TOP) p2_y = DEMO_TOP;
         if (p2_y > DEMO_BOTTOM - PAD_H) p2_y = DEMO_BOTTOM - PAD_H;
         ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_MAGENTA);
+        LED_P2_OFF();  // Opreste LED dupa redraw paleta
 
         uint16_t ball_color = rainbow_colors[(now / 200) % NUM_RAINBOW_COLORS];
         ST7735_FillRect(ball_x, ball_y, BALL_SZ, BALL_SZ, ball_color);
@@ -1774,6 +2170,9 @@ void PlayIntroAnimation(void) {
     }
 
     PRINTF("Button pressed - going to menu\r\n");
+
+    /* === Opreste melodia === */
+    Buzzer_Off();
 
     for (int i = 0; i < 5; i++) {
         ST7735_DrawRect(i * 15, i * 12, 160 - i * 30, 128 - i * 24, COLOR_WHITE);
@@ -2083,6 +2482,14 @@ int main(void) {
 	Gyro_Init();
 	PRINTF("Gyroscope OK!\r\n\r\n");
 
+    PRINTF("Initializing Arcade LEDs...\r\n");
+    LED_Arcade_Init();
+    PRINTF("Arcade LEDs OK!\r\n\r\n");
+
+    PRINTF("Initializing Buzzer...\r\n");
+    Buzzer_Init();
+    PRINTF("Buzzer OK!\r\n\r\n");
+
     PRINTF("=== CONTROLS ===\r\n");
     PRINTF("MENU: Joystick/IR UP/DOWN + Button/OK=Select\r\n");
     PRINTF("GAME: Joystick/IR UP/DOWN = Move paddle\r\n");
@@ -2099,8 +2506,24 @@ int main(void) {
     const uint32_t GAME_FRAME_MS = 20;
     const uint32_t MENU_FRAME_MS = 50;
 
+    /* === MELODIE CONTINUA PENTRU TEST === */
+    uint32_t last_melody_note = 0;
+    uint16_t melody_index = 0;
+
     while (1) {
         uint32_t now = Timer_GetMs();
+
+        /* === REDA MELODIA CONTINUU (PENTRU TEST) === */
+        if ((now - last_melody_note) >= 600) {  // 600ms per nota - foarte lent
+            last_melody_note = now;
+            if (melody_index < METRO_MELODY_LENGTH && metro_melody[melody_index].frequency != NOTE_REST) {
+                Buzzer_Tone(metro_melody[melody_index].frequency, 400);  // Nota 400ms
+                Buzzer_Off();  // Pauza 200ms intre note
+                melody_index++;
+            } else {
+                melody_index = 0;  // Loop
+            }
+        }
 
         Joystick_Process();
 

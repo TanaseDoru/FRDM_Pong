@@ -1,6 +1,6 @@
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_spi.h:350:20:SPI_Enable	16	static
-C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_spi.h:350:20:SPI_Enable	16	static
+C:\Users\Calin\an4\sem1\Micro\FRDM_Pong\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
 ../source/st7735_simple.c:59:13:delay_ms	24	static
 ../source/st7735_simple.c:64:20:SPI_WriteByteFast	16	static
 ../source/st7735_simple.c:87:13:WriteCommand	16	static
