@@ -18,6 +18,7 @@
 #include "fsl_debug_console.h"
 #include "fsl_uart.h"
 #include "fsl_adc16.h"
+#include "fsl_pit.h"
 #include "fsl_gpio.h"
 #include "fsl_port.h"
 #include "st7735_simple.h"
@@ -251,6 +252,73 @@ void delay_ms(uint32_t ms) {
 bool Timer_Elapsed(uint32_t start_time, uint32_t duration_ms) {
     return ((g_systick_ms - start_time) >= duration_ms);
 }
+
+/*============================================================================
+ * TIMERE HARDWARE (PIT) PENTRU GAME/MENU/GYRO
+ *============================================================================*/
+
+#define PIT_TICK_MS      10U      // baza de timp PIT = 10ms
+#define GAME_FRAME_MS    20U      // deja aveai asta in main, mutat aici
+#define MENU_FRAME_MS    50U
+#define GYRO_POLL_MS     400U     // daca vrei sa ai si un tick pentru gyro
+
+// numar de ticks PIT pentru fiecare eveniment
+#define GAME_TICKS   (GAME_FRAME_MS / PIT_TICK_MS)   // 2
+#define MENU_TICKS   (MENU_FRAME_MS / PIT_TICK_MS)   // 5
+#define GYRO_TICKS   (GYRO_POLL_MS / PIT_TICK_MS)    // 40
+
+static volatile uint8_t g_game_tick = 0;
+static volatile uint8_t g_menu_tick = 0;
+static volatile uint8_t g_gyro_tick = 0;
+static uint16_t g_pit_tick_counter = 0;
+
+void PIT0_Init(void) {
+    CLOCK_EnableClock(kCLOCK_Pit);
+
+    PIT_ConfigType pitConfig;
+    PIT_GetDefaultConfig(&pitConfig);      // dacă nu ai helper-ul, folosim direct registrele
+    PIT_Init(PIT, &pitConfig);
+
+    uint32_t pitClock = CLOCK_GetFreq(kCLOCK_BusClk);  // frecvența pe bus
+    uint32_t ldval = (pitClock / 1000U) * PIT_TICK_MS - 1U;
+
+    PIT_SetTimerPeriod(PIT, kPIT_Chnl_0, ldval);
+
+    PIT_EnableInterrupts(PIT, kPIT_Chnl_0, kPIT_TimerInterruptEnable);
+    EnableIRQ(PIT0_IRQn);
+
+    PIT_StartTimer(PIT, kPIT_Chnl_0);
+
+    PRINTF("PIT0 initialized for %u ms tick\r\n", PIT_TICK_MS);
+}
+
+void PIT0_IRQHandler(void) {
+    // sterge flag-ul de intrerupere
+    PIT_ClearStatusFlags(PIT, kPIT_Chnl_0, kPIT_TimerFlag);
+
+    g_pit_tick_counter++;
+
+    // game update la fiecare 20ms
+    if ((g_pit_tick_counter % GAME_TICKS) == 0) {
+        g_game_tick = 1;
+    }
+
+    // menu update la fiecare 50ms
+    if ((g_pit_tick_counter % MENU_TICKS) == 0) {
+        g_menu_tick = 1;
+    }
+
+    // gyro „tick” la fiecare 400ms (optional, pentru logica ta)
+    if ((g_pit_tick_counter % GYRO_TICKS) == 0) {
+        g_gyro_tick = 1;
+    }
+
+    // evitam overflow mare
+    if (g_pit_tick_counter >= 1000) {
+        g_pit_tick_counter = 0;
+    }
+}
+
 
 /*============================================================================
  * FUNCTII HELPER
@@ -2048,6 +2116,8 @@ int main(void) {
     BOARD_InitDebugConsole();
 
     Timer_Init();
+    PIT0_Init();
+
 
     srand(g_systick_ms ^ 0xDEADBEEF);
 
@@ -2094,13 +2164,7 @@ int main(void) {
 
     PRINTF(">>> Ready! <<<\r\n\r\n");
 
-    uint32_t last_game_update = 0;
-    uint32_t last_menu_update = 0;
-    const uint32_t GAME_FRAME_MS = 20;
-    const uint32_t MENU_FRAME_MS = 50;
-
     while (1) {
-        uint32_t now = Timer_GetMs();
 
         Joystick_Process();
 
@@ -2108,14 +2172,12 @@ int main(void) {
 			Gyro_Process_Data(g_gyro_rx_buffer);   // => PRINTF "Inclinatie: ..."
 		}
 
-
-
         if (g_currentScreen == SCREEN_GAMEPLAY) {
 
             ProcessGameInput();
 
-            if ((now - last_game_update) >= GAME_FRAME_MS) {
-                last_game_update = now;
+            if (g_game_tick) {
+                g_game_tick = 0;
 
                 Game_Update();
 
@@ -2143,7 +2205,8 @@ int main(void) {
             }
 
         } else {
-            if ((now - last_menu_update) >= MENU_FRAME_MS) {
+            if (g_menu_tick) {
+            	g_menu_tick = 0;
                 last_menu_update = now;
                 ProcessMenuInput();
             }
