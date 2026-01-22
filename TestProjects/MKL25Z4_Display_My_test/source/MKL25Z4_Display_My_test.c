@@ -2488,8 +2488,6 @@ int main(void) {
 
 
     while (1) {
-        uint32_t now = Timer_GetMs();
-
         Joystick_Process();
 
         if (Gyro_Check_UART_Data()) {
@@ -2502,8 +2500,8 @@ int main(void) {
 
             ProcessGameInput();
 
-            if ((now - last_game_update) >= GAME_FRAME_MS) {
-                last_game_update = now;
+            if (g_game_tick) {
+            	g_game_tick = 0;
 
                 Game_Update();
 
@@ -2531,8 +2529,8 @@ int main(void) {
             }
 
         } else {
-            if ((now - last_menu_update) >= MENU_FRAME_MS) {
-                last_menu_update = now;
+            if (g_menu_tick) {
+            	g_menu_tick = 0;
                 ProcessMenuInput();
             }
 

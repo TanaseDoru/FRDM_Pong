@@ -93,4 +93,4 @@ C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_t
 ../source/MKL25Z4_Display_My_test.c:2236:6:Menu_Select	40	static
 ../source/MKL25Z4_Display_My_test.c:2334:6:ProcessMenuInput	24	static
 ../source/MKL25Z4_Display_My_test.c:2347:6:ProcessGameInput	24	static
-../source/MKL25Z4_Display_My_test.c:2419:5:main	24	static
+../source/MKL25Z4_Display_My_test.c:2419:5:main	16	static
