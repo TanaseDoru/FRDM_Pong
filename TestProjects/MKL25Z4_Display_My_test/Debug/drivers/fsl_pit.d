@@ -1,5 +1,5 @@
-drivers/fsl_smc.o drivers/fsl_smc.d: ../drivers/fsl_smc.c \
- ../drivers/fsl_smc.h ../drivers/fsl_common.h \
+drivers/fsl_pit.o drivers/fsl_pit.d: ../drivers/fsl_pit.c \
+ ../drivers/fsl_pit.h ../drivers/fsl_common.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/fsl_device_registers.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/MKL25Z4.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/core_cm0plus.h \
@@ -8,8 +8,8 @@ drivers/fsl_smc.o drivers/fsl_smc.d: ../drivers/fsl_smc.c \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/core_cmFunc.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/system_MKL25Z4.h \
  C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/MKL25Z4_features.h \
- ../drivers/fsl_clock.h ../drivers/fsl_flash.h
-../drivers/fsl_smc.h:
+ ../drivers/fsl_clock.h
+../drivers/fsl_pit.h:
 ../drivers/fsl_common.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/fsl_device_registers.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/MKL25Z4.h:
@@ -20,4 +20,3 @@ C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/system_MKL25Z4.h:
 C:\Users\Tanase\Desktop\Proiect\ MP\ MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/MKL25Z4_features.h:
 ../drivers/fsl_clock.h:
-../drivers/fsl_flash.h:

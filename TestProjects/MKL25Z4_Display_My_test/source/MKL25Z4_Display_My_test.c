@@ -275,6 +275,16 @@ static uint32_t g_ir_last_input_time = 0;
 #define COLOR_BACK        COLOR_ORANGE
 
 /*============================================================================
+ * TIMING CU PIT PENTRU UPDATE FPS
+ *============================================================================*/
+
+volatile uint8_t g_game_tick = 0;   // se seteaza la fiecare 20 ms (GAME_FRAME_MS)
+volatile uint8_t g_menu_tick = 0;   // se seteaza la fiecare 50 ms (MENU_FRAME_MS)
+#define GAME_FRAME_MS 20
+#define MENU_FRAME_MS 50
+
+
+/*============================================================================
  * SYSTICK TIMER
  *============================================================================*/
 
@@ -303,6 +313,60 @@ void delay_ms(uint32_t ms) {
 bool Timer_Elapsed(uint32_t start_time, uint32_t duration_ms) {
     return ((g_systick_ms - start_time) >= duration_ms);
 }
+
+/*============================================================================
+ * PIT TIMER PENTRU GAME/MENU UPDATE
+ *============================================================================*/
+
+void PIT_Init(void) {
+    /* Clock la modulul PIT */
+    SIM->SCGC6 |= SIM_SCGC6_PIT_MASK;
+
+    /* Enable PIT, freeze in debug */
+    PIT->MCR &= ~PIT_MCR_MDIS_MASK;
+    PIT->MCR |= PIT_MCR_FRZ_MASK;
+
+    /* Frecvența bus clock – pe FRDM-KL25Z tipic este SystemCoreClock/2 */
+    uint32_t busClock = SystemCoreClock / 2U;
+
+    /* Perioade în tick-uri pentru ch0 (game) și ch1 (menu) */
+    uint32_t gamePeriod = (busClock * GAME_FRAME_MS / 1000U) - 1U;  // ~20ms
+    uint32_t menuPeriod = (busClock * MENU_FRAME_MS / 1000U) - 1U;  // ~50ms
+
+    /* Channel 0 – update joc */
+    PIT->CHANNEL[0].LDVAL = PIT_LDVAL_TSV(gamePeriod);
+    PIT->CHANNEL[0].TCTRL = PIT_TCTRL_TIE_MASK;  // interrupt enable
+
+    /* Channel 1 – update meniu */
+    PIT->CHANNEL[1].LDVAL = PIT_LDVAL_TSV(menuPeriod);
+    PIT->CHANNEL[1].TCTRL = PIT_TCTRL_TIE_MASK;  // interrupt enable
+
+    /* NVIC pentru PIT (canalele împart același IRQ) */
+    NVIC_SetPriority(PIT_IRQn, 3);
+    NVIC_ClearPendingIRQ(PIT_IRQn);
+    NVIC_EnableIRQ(PIT_IRQn);
+
+    /* Pornim ambele canale */
+    PIT->CHANNEL[0].TCTRL |= PIT_TCTRL_TEN_MASK;
+    PIT->CHANNEL[1].TCTRL |= PIT_TCTRL_TEN_MASK;
+
+    PRINTF("PIT initialized (CH0=%d ms, CH1=%d ms)\r\n", GAME_FRAME_MS, MENU_FRAME_MS);
+}
+
+void PIT_IRQHandler(void) {
+    /* Channel 0 – tick pentru gameplay */
+    if (PIT->CHANNEL[0].TFLG & PIT_TFLG_TIF_MASK) {
+        PIT->CHANNEL[0].TFLG = PIT_TFLG_TIF_MASK;   // clear flag
+        g_game_tick = 1;
+    }
+
+    /* Channel 1 – tick pentru meniuri */
+    if (PIT->CHANNEL[1].TFLG & PIT_TFLG_TIF_MASK) {
+        PIT->CHANNEL[1].TFLG = PIT_TFLG_TIF_MASK;   // clear flag
+        g_menu_tick = 1;
+    }
+}
+
 
 /*============================================================================
  * FUNCTII LED ARCADE
@@ -460,81 +524,6 @@ void Buzzer_SetEnabled(uint8_t enabled) {
     }
 }
 
-// Structura pentru o nota muzicala
-typedef struct {
-    uint16_t frequency;
-    uint16_t duration_ms;
-} Note_t;
-
-// Melodia "The Metro" - Berlin (Intro in B minor)
-// Tempo ~120 BPM, 0.5 beat = 250ms, dar vom folosi 150ms pentru arcade feel
-static const Note_t metro_melody[] = {
-    // Intro - B2 repetat (beat 1-8.5) - note grave
-    {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200},
-    {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200}, {NOTE_B2, 200},
-
-    // Pattern principal - note grave, tempo mai lent
-    {NOTE_E2, 200}, {NOTE_E2, 200},      // beat 9
-    {NOTE_B3, 200}, {NOTE_B3, 200},      // beat 10
-    {NOTE_FS2, 200}, {NOTE_FS2, 200},    // beat 11
-    {NOTE_G2, 200}, {NOTE_G2, 200},      // beat 12
-    {NOTE_D3, 200}, {NOTE_D3, 200},      // beat 13
-    {NOTE_A2, 200}, {NOTE_A2, 200},      // beat 14
-    {NOTE_C3, 200}, {NOTE_C3, 200},      // beat 15
-    {NOTE_B3, 200}, {NOTE_B3, 200},      // beat 16
-
-    // Repetare pattern
-    {NOTE_E2, 200}, {NOTE_E2, 200},
-    {NOTE_B3, 200}, {NOTE_B3, 200},
-    {NOTE_FS2, 200}, {NOTE_FS2, 200},
-    {NOTE_G2, 200}, {NOTE_G2, 200},
-    {NOTE_D3, 200}, {NOTE_D3, 200},
-    {NOTE_A2, 200}, {NOTE_A2, 200},
-    {NOTE_C3, 200}, {NOTE_C3, 200},
-    {NOTE_B3, 200}, {NOTE_B3, 200},
-
-    {NOTE_REST, 0}  // End marker
-};
-
-#define METRO_MELODY_LENGTH (sizeof(metro_melody) / sizeof(metro_melody[0]) - 1)
-
-// Variabile pentru redare melodie in background
-static volatile uint16_t g_melody_index = 0;
-static volatile uint8_t g_melody_playing = 0;
-
-void Buzzer_PlayMelodyBlocking(void) {
-    if (!g_sound_enabled) return;
-
-    for (uint16_t i = 0; i < METRO_MELODY_LENGTH; i++) {
-        if (metro_melody[i].frequency == NOTE_REST) break;
-        Buzzer_Tone(metro_melody[i].frequency, metro_melody[i].duration_ms);
-        delay_ms(20);  // Mica pauza intre note pentru articulare
-    }
-    Buzzer_Off();
-}
-
-// Reda o singura nota din melodie (pentru redare non-blocking in intro)
-void Buzzer_PlayNextNote(void) {
-    if (!g_sound_enabled || !g_melody_playing) return;
-
-    if (g_melody_index >= METRO_MELODY_LENGTH ||
-        metro_melody[g_melody_index].frequency == NOTE_REST) {
-        g_melody_index = 0;  // Loop melodia
-    }
-
-    Buzzer_Tone(metro_melody[g_melody_index].frequency, 0);  // Start tone fara delay
-    g_melody_index++;
-}
-
-void Buzzer_StartMelody(void) {
-    g_melody_index = 0;
-    g_melody_playing = 1;
-}
-
-void Buzzer_StopMelody(void) {
-    g_melody_playing = 0;
-    Buzzer_Off();
-}
 
 // Efect sonor pentru gol
 void Buzzer_GoalSound(void) {
@@ -1664,7 +1653,6 @@ void DrawMainScreen(void) {
 
     DrawMenuItem(0, "Start", g_menuState.selectedIndex == 0, true);
     DrawMenuItem(1, "Select Input", g_menuState.selectedIndex == 1, true);
-    DrawMenuItem(2, "Mute Music", g_menuState.selectedIndex == 2, true);
 
     ST7735_DrawHLine(0, 100, ST7735_WIDTH, COLOR_GRAY);
 
@@ -1883,8 +1871,6 @@ void PlayIntroAnimation(void) {
     const int16_t DEMO_TOP = 66;
     const int16_t DEMO_BOTTOM = 102;
     uint32_t anim_start;
-    uint32_t last_note_time = 0;
-    uint16_t note_index = 0;
 
     /* === LED-uri la start intro === */
     LED_BothFlash(2, 100, 100);
@@ -2074,16 +2060,6 @@ void PlayIntroAnimation(void) {
     while (!g_joy_btn_pressed && !IR_IsPausePressed()) {
         uint32_t now = Timer_GetMs();
 
-        /* === Reda melodia "The Metro" in timpul demo-ului === */
-        if ((now - last_note_time) >= 120) {  // O nota la fiecare 120ms
-            last_note_time = now;
-            if (note_index < METRO_MELODY_LENGTH && metro_melody[note_index].frequency != NOTE_REST) {
-                Buzzer_Tone(metro_melody[note_index].frequency, 0);  // Start nota fara delay
-                note_index++;
-            } else {
-                note_index = 0;  // Loop melodia
-            }
-        }
 
         ST7735_FillRect(ball_x, ball_y, BALL_SZ, BALL_SZ, COLOR_BLACK);
 
@@ -2199,7 +2175,7 @@ void DrawCurrentScreen(void) {
             DrawMainScreen();
             break;
         case SCREEN_MAIN:
-            g_menuState.maxItems = 3;
+            g_menuState.maxItems = 2;
             DrawMainScreen();
             break;
         case SCREEN_START:
@@ -2490,6 +2466,11 @@ int main(void) {
     Buzzer_Init();
     PRINTF("Buzzer OK!\r\n\r\n");
 
+    PRINTF("Initializing PIT timers...\r\n");
+    PIT_Init();
+    PRINTF("PIT timers OK!\r\n\r\n");
+
+
     PRINTF("=== CONTROLS ===\r\n");
     PRINTF("MENU: Joystick/IR UP/DOWN + Button/OK=Select\r\n");
     PRINTF("GAME: Joystick/IR UP/DOWN = Move paddle\r\n");
@@ -2503,27 +2484,11 @@ int main(void) {
 
     uint32_t last_game_update = 0;
     uint32_t last_menu_update = 0;
-    const uint32_t GAME_FRAME_MS = 20;
-    const uint32_t MENU_FRAME_MS = 50;
 
-    /* === MELODIE CONTINUA PENTRU TEST === */
-    uint32_t last_melody_note = 0;
-    uint16_t melody_index = 0;
+
 
     while (1) {
         uint32_t now = Timer_GetMs();
-
-        /* === REDA MELODIA CONTINUU (PENTRU TEST) === */
-        if ((now - last_melody_note) >= 600) {  // 600ms per nota - foarte lent
-            last_melody_note = now;
-            if (melody_index < METRO_MELODY_LENGTH && metro_melody[melody_index].frequency != NOTE_REST) {
-                Buzzer_Tone(metro_melody[melody_index].frequency, 400);  // Nota 400ms
-                Buzzer_Off();  // Pauza 200ms intre note
-                melody_index++;
-            } else {
-                melody_index = 0;  // Loop
-            }
-        }
 
         Joystick_Process();
 
