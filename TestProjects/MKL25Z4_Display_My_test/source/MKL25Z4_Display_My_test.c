@@ -108,7 +108,7 @@ static UITimers_t g_ui_timers = {0};
  *============================================================================*/
 
 InputType_t g_player1_input = INPUT_JOYSTICK;
-InputType_t g_player2_input = INPUT_CPU_MEDIUM;
+InputType_t g_player2_input = INPUT_REMOTE;
 
 Screen_t g_currentScreen = SCREEN_INTRO;
 MenuState_t g_menuState = {0, 3};
@@ -2346,28 +2346,43 @@ void ProcessMenuInput(void) {
 
 void ProcessGameInput(void) {
     if (g_currentScreen == SCREEN_PAUSED) {
+        /* Joystick pentru navigare */
         Joystick_Process();
         int16_t joy_y = Joystick_GetY_Percent();
 
         static bool pause_nav_consumed = false;
         if (joy_y > 50 && !pause_nav_consumed) {
-            g_pause_selection = 1;
+            g_pause_selection = 1;           // jos -> Exit
             pause_nav_consumed = true;
             g_needsRedraw = 1;
         } else if (joy_y < -50 && !pause_nav_consumed) {
-            g_pause_selection = 0;
+            g_pause_selection = 0;           // sus -> Resume
             pause_nav_consumed = true;
             g_needsRedraw = 1;
         } else if (joy_y > -30 && joy_y < 30) {
             pause_nav_consumed = false;
         }
 
+        /* Remote pentru navigare + select (UP/DOWN/OK) */
+        JoyAction_t ir_action = IR_GetMenuAction();
+        if (ir_action == JOY_ACTION_UP) {
+            g_pause_selection = 0;           // Resume
+            g_needsRedraw = 1;
+        } else if (ir_action == JOY_ACTION_DOWN) {
+            g_pause_selection = 1;           // Exit
+            g_needsRedraw = 1;
+        }
+
         bool select_pressed = false;
+
+        /* Joystick buton -> select */
         if (g_joy_btn_pressed) {
             g_joy_btn_pressed = false;
             select_pressed = true;
         }
-        if (IR_IsPausePressed()) {
+
+        /* Remote OK/POWER -> select (via IR_GetMenuAction) */
+        if (ir_action == JOY_ACTION_SELECT) {
             select_pressed = true;
         }
 
@@ -2407,10 +2422,11 @@ void ProcessGameInput(void) {
             return;
         }
 
-        /* Proceseaza IR pentru miscare paleta */
+        /* Proceseaza IR pentru miscare paleta in gameplay */
         IR_ProcessGameInput();
     }
 }
+
 
 /*============================================================================
  * MAIN
@@ -2481,11 +2497,6 @@ int main(void) {
     DrawCurrentScreen();
 
     PRINTF(">>> Ready! <<<\r\n\r\n");
-
-    uint32_t last_game_update = 0;
-    uint32_t last_menu_update = 0;
-
-
 
     while (1) {
         Joystick_Process();

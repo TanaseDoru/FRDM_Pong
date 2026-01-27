@@ -691,7 +691,7 @@
 	<storageModule moduleId="com.nxp.mcuxpresso.core.datamodels">
 		<sdkName>SDK_2.x_FRDM-KL25Z</sdkName>
 		<sdkVersion>2.2.0</sdkVersion>
-		<sdkComponents>project_template.frdmkl25z.MKL25Z4;platform.drivers.common.MKL25Z4;platform.drivers.lpsci.MKL25Z4;platform.drivers.port.MKL25Z4;platform.devices.MKL25Z4_startup.MKL25Z4;platform.drivers.clock.MKL25Z4;platform.drivers.smc.MKL25Z4;platform.drivers.uart.MKL25Z4;platform.utilities.debug_console.MKL25Z4;platform.Include_common;platform.drivers.flash.MKL25Z4;platform.drivers.gpio.MKL25Z4;platform.drivers.spi.MKL25Z4;platform.drivers.adc16.MKL25Z4;middleware.baremetal.MKL25Z4;startup;CMSIS_Include;platform.drivers.tpm.MKL25Z4;</sdkComponents>
+		<sdkComponents>project_template.frdmkl25z.MKL25Z4;platform.drivers.common.MKL25Z4;platform.drivers.lpsci.MKL25Z4;platform.drivers.port.MKL25Z4;platform.devices.MKL25Z4_startup.MKL25Z4;platform.drivers.clock.MKL25Z4;platform.drivers.smc.MKL25Z4;platform.drivers.uart.MKL25Z4;platform.utilities.debug_console.MKL25Z4;platform.Include_common;platform.drivers.flash.MKL25Z4;platform.drivers.gpio.MKL25Z4;platform.drivers.spi.MKL25Z4;platform.drivers.adc16.MKL25Z4;middleware.baremetal.MKL25Z4;startup;CMSIS_Include;platform.drivers.pit.MKL25Z4;</sdkComponents>
 		<boardId>frdmkl25z</boardId>
 		<package>MKL25Z128VLK4</package>
 		<core>cm0plus</core>
