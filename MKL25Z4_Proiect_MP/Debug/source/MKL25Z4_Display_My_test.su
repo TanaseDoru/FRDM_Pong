@@ -1,0 +1,96 @@
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/core_cm0plus.h:745:22:NVIC_EnableIRQ	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/core_cm0plus.h:791:22:NVIC_ClearPendingIRQ	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/core_cm0plus.h:804:22:NVIC_SetPriority	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\CMSIS/core_cm0plus.h:885:26:SysTick_Config	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:584:20:CLOCK_EnableClock	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_clock.h:614:20:CLOCK_SetTpmClock	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_common.h:212:20:EnableIRQ	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_gpio.h:175:20:GPIO_SetPinsOutput	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_gpio.h:186:20:GPIO_ClearPinsOutput	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_gpio.h:197:20:GPIO_TogglePinsOutput	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_uart.h:555:23:UART_ReadByte	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_adc16.h:500:24:ADC16_GetChannelConversionValue	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:321:20:PORT_SetPinMux	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:389:20:PORT_SetPinInterruptConfig	24	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:407:24:PORT_GetPinsInterruptFlags	16	static
+C:\Users\Tanase\Desktop\Proiect MP MCUProjects\TestProjects\MKL25Z4_Display_My_test\drivers/fsl_port.h:418:20:PORT_ClearPinsInterruptFlags	16	static
+../source/MKL25Z4_Display_My_test.c:305:6:SysTick_Handler	8	static
+../source/MKL25Z4_Display_My_test.c:309:6:Timer_Init	8	static
+../source/MKL25Z4_Display_My_test.c:314:10:Timer_GetMs	8	static
+../source/MKL25Z4_Display_My_test.c:318:6:delay_ms	24	static
+../source/MKL25Z4_Display_My_test.c:325:6:Timer_Elapsed	16	static
+../source/MKL25Z4_Display_My_test.c:333:6:PIT_Init	24	static
+../source/MKL25Z4_Display_My_test.c:368:6:PIT_IRQHandler	8	static
+../source/MKL25Z4_Display_My_test.c:387:6:LED_Arcade_Init	16	static
+../source/MKL25Z4_Display_My_test.c:413:6:LED_GoalFlash	24	static
+../source/MKL25Z4_Display_My_test.c:431:6:LED_BothFlash	32	static
+../source/MKL25Z4_Display_My_test.c:441:6:LED_AlternatingFlash	24	static
+../source/MKL25Z4_Display_My_test.c:452:6:LED_VictoryPulse	24	static
+../source/MKL25Z4_Display_My_test.c:473:6:Buzzer_Init	8	static
+../source/MKL25Z4_Display_My_test.c:499:6:Buzzer_Tone	24	static
+../source/MKL25Z4_Display_My_test.c:528:6:Buzzer_Off	8	static
+../source/MKL25Z4_Display_My_test.c:532:6:Buzzer_SetEnabled	16	static
+../source/MKL25Z4_Display_My_test.c:541:6:Buzzer_GoalSound	8	static
+../source/MKL25Z4_Display_My_test.c:553:6:Buzzer_StartSound	8	static
+../source/MKL25Z4_Display_My_test.c:563:6:Buzzer_GameOverSound	8	static
+../source/MKL25Z4_Display_My_test.c:576:13:GetInputName	16	static
+../source/MKL25Z4_Display_My_test.c:588:6:IsCPUInput	16	static
+../source/MKL25Z4_Display_My_test.c:592:6:IsInputAvailable	16	static
+../source/MKL25Z4_Display_My_test.c:604:6:UI_PrintStats	32	static
+../source/MKL25Z4_Display_My_test.c:628:6:PORTD_IRQHandler	16	static
+../source/MKL25Z4_Display_My_test.c:651:17:Joystick_ReadADC	24	static
+../source/MKL25Z4_Display_My_test.c:662:6:Joystick_Init	24	static
+../source/MKL25Z4_Display_My_test.c:688:6:Joystick_Process	24	static
+../source/MKL25Z4_Display_My_test.c:705:13:Joystick_GetMenuAction	8	static
+../source/MKL25Z4_Display_My_test.c:725:9:Joystick_GetY_Percent	8	static
+../source/MKL25Z4_Display_My_test.c:733:6:TPM0_IRQHandler	8	static
+../source/MKL25Z4_Display_My_test.c:750:6:PORTA_IRQHandler	16	static
+../source/MKL25Z4_Display_My_test.c:769:6:IR_DecodeNEC	32	static
+../source/MKL25Z4_Display_My_test.c:809:6:IR_Init	16	static
+../source/MKL25Z4_Display_My_test.c:826:6:TPM0_Init	8	static
+../source/MKL25Z4_Display_My_test.c:840:13:IR_GetMenuAction	16	static
+../source/MKL25Z4_Display_My_test.c:876:6:IR_ProcessGameInput	16	static
+../source/MKL25Z4_Display_My_test.c:922:8:IR_GetCurrentDirection	8	static
+../source/MKL25Z4_Display_My_test.c:926:6:IR_ResetGameState	8	static
+../source/MKL25Z4_Display_My_test.c:934:6:IR_CheckPauseOnly	16	static
+../source/MKL25Z4_Display_My_test.c:954:6:IR_IsPausePressed	16	static
+../source/MKL25Z4_Display_My_test.c:996:6:Gyro_Init	16	static
+../source/MKL25Z4_Display_My_test.c:1019:5:Gyro_Check_UART_Data	24	static
+../source/MKL25Z4_Display_My_test.c:1048:9:Map_Angle_To_Paddle	24	static
+../source/MKL25Z4_Display_My_test.c:1062:13:Gyro_GetCompassDir	16	static
+../source/MKL25Z4_Display_My_test.c:1075:6:Gyro_Process_Data	88	static
+../source/MKL25Z4_Display_My_test.c:1117:9:Gyro_GetPaddleY	8	static
+../source/MKL25Z4_Display_My_test.c:1121:6:Gyro_IsActive	8	static
+../source/MKL25Z4_Display_My_test.c:1130:9:AI_PredictBallY	32	static
+../source/MKL25Z4_Display_My_test.c:1157:6:AI_UpdatePaddle	56	static
+../source/MKL25Z4_Display_My_test.c:1223:6:Game_Init	8	static
+../source/MKL25Z4_Display_My_test.c:1274:6:Game_DrawField	24	static
+../source/MKL25Z4_Display_My_test.c:1289:6:Game_DrawScore	32	static
+../source/MKL25Z4_Display_My_test.c:1306:6:Game_DrawPaddle	40	static
+../source/MKL25Z4_Display_My_test.c:1337:6:Game_RedrawCenterLine	24	static
+../source/MKL25Z4_Display_My_test.c:1343:6:Game_DrawBall	32	static
+../source/MKL25Z4_Display_My_test.c:1367:6:Game_ResetBall	32	static
+../source/MKL25Z4_Display_My_test.c:1385:6:Game_Update	48	static
+../source/MKL25Z4_Display_My_test.c:1550:6:Game_Start	24	static
+../source/MKL25Z4_Display_My_test.c:1614:6:DrawTitle	24	static
+../source/MKL25Z4_Display_My_test.c:1620:6:DrawMenuItem	40	static
+../source/MKL25Z4_Display_My_test.c:1635:6:DrawInputMenuItem	56	static
+../source/MKL25Z4_Display_My_test.c:1664:6:DrawBackOption	40	static
+../source/MKL25Z4_Display_My_test.c:1677:6:DrawMainScreen	56	static
+../source/MKL25Z4_Display_My_test.c:1701:6:DrawStartScreen	8	static
+../source/MKL25Z4_Display_My_test.c:1710:6:DrawSelectInputScreen	40	static
+../source/MKL25Z4_Display_My_test.c:1732:6:DrawSelectP1Screen	8	static
+../source/MKL25Z4_Display_My_test.c:1746:6:DrawSelectP2Screen	8	static
+../source/MKL25Z4_Display_My_test.c:1760:6:DrawDifficultyScreen	16	static
+../source/MKL25Z4_Display_My_test.c:1788:6:DrawGameOverScreen	72	static
+../source/MKL25Z4_Display_My_test.c:1828:6:DrawPausedScreen	16	static
+../source/MKL25Z4_Display_My_test.c:1864:6:DrawBMOFace	24	static
+../source/MKL25Z4_Display_My_test.c:1904:6:PlayIntroAnimation	216	static
+../source/MKL25Z4_Display_My_test.c:2207:6:DrawCurrentScreen	8	static
+../source/MKL25Z4_Display_My_test.c:2257:6:Menu_MoveUp	8	static
+../source/MKL25Z4_Display_My_test.c:2263:6:Menu_MoveDown	8	static
+../source/MKL25Z4_Display_My_test.c:2269:6:ChangeScreen	16	static
+../source/MKL25Z4_Display_My_test.c:2275:6:Menu_Select	40	static
+../source/MKL25Z4_Display_My_test.c:2373:6:ProcessMenuInput	24	static
+../source/MKL25Z4_Display_My_test.c:2386:6:ProcessGameInput	24	static
+../source/MKL25Z4_Display_My_test.c:2474:5:main	8	static

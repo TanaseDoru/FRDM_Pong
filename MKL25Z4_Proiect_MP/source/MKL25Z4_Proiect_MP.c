@@ -1,0 +1,2596 @@
+/*
+ * MKL25Z4_Display_Test.c
+ * Sistem de Meniu + Joc Pong Complet
+ * ST7735 LCD + FRDM-KL25Z
+ * Cu suport Joystick, IR Remote, si CPU Bot
+ *
+ * MODIFICAT: IR functioneaza in joc + Timere UI debug
+ */
+
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include "board.h"
+#include "peripherals.h"
+#include "pin_mux.h"
+#include "clock_config.h"
+#include "MKL25Z4.h"
+#include "fsl_debug_console.h"
+#include "fsl_uart.h"
+#include "fsl_adc16.h"
+#include "fsl_gpio.h"
+#include "fsl_port.h"
+#include "fsl_tpm.h"
+#include "st7735_simple.h"
+
+/*============================================================================
+ * DEFINITII TIPURI INPUT SI ECRANE
+ *============================================================================*/
+
+typedef enum {
+    INPUT_NONE = 0,
+    INPUT_JOYSTICK,
+    INPUT_REMOTE,
+    INPUT_GYROSCOPE,
+    INPUT_CPU_EASY,
+    INPUT_CPU_MEDIUM,
+    INPUT_CPU_HARD
+} InputType_t;
+
+typedef enum {
+    SCREEN_INTRO = 0,
+    SCREEN_MAIN,
+    SCREEN_START,
+    SCREEN_SELECT_INPUT,
+    SCREEN_SELECT_P1,
+    SCREEN_SELECT_P2,
+    SCREEN_DIFFICULTY,
+    SCREEN_GAMEPLAY,
+    SCREEN_GAME_OVER,
+    SCREEN_PAUSED
+} Screen_t;
+
+/*============================================================================
+ * STRUCTURI PENTRU JOC
+ *============================================================================*/
+
+typedef struct {
+    int16_t x, y;
+    int16_t dx, dy;
+    int16_t prev_x, prev_y;
+    uint8_t size;
+} Ball_t;
+
+typedef struct {
+    int16_t y;
+    int16_t prev_y;
+    int16_t score;
+    InputType_t input;
+    int16_t target_y;
+} Paddle_t;
+
+typedef struct {
+    uint8_t is_running;
+    uint8_t is_paused;
+    uint8_t winner;
+    uint8_t winning_score;
+    uint16_t frame_count;
+    uint16_t rally_frames;
+    uint8_t speed_level;
+} GameState_t;
+
+typedef struct {
+    uint8_t selectedIndex;
+    uint8_t maxItems;
+} MenuState_t;
+
+/*============================================================================
+ * STRUCTURA PENTRU TIMERE UI DEBUG
+ *============================================================================*/
+
+typedef struct {
+    uint32_t last_ball_draw_time;
+    uint32_t last_paddle_draw_time;
+    uint32_t last_score_draw_time;
+    uint32_t last_field_draw_time;
+    uint32_t last_menu_draw_time;
+    uint32_t last_game_update_time;
+    uint32_t ball_draw_count;
+    uint32_t paddle_draw_count;
+    uint32_t frame_count;
+    uint32_t last_fps_print;
+} UITimers_t;
+
+static UITimers_t g_ui_timers = {0};
+
+/*============================================================================
+ * VARIABILE GLOBALE
+ *============================================================================*/
+
+InputType_t g_player1_input = INPUT_JOYSTICK;
+InputType_t g_player2_input = INPUT_REMOTE;
+
+Screen_t g_currentScreen = SCREEN_INTRO;
+MenuState_t g_menuState = {0, 3};
+
+volatile uint8_t g_needsRedraw = 1;
+
+static Ball_t ball;
+static Paddle_t paddle1, paddle2;
+static GameState_t game;
+
+static int8_t g_p1_move = 0;
+static int8_t g_p2_move = 0;
+
+
+static uint8_t g_game_over_effects_played = 0;
+
+
+
+/*============================================================================
+ * CONSTANTE PENTRU JOC
+ *============================================================================*/
+
+#define FIELD_WIDTH      160
+#define FIELD_HEIGHT     128
+#define PADDLE_WIDTH     4
+#define PADDLE_HEIGHT    22
+#define PADDLE_X_P1      4
+#define PADDLE_X_P2      152
+#define BALL_SIZE        4
+#define BALL_START_X     80
+#define BALL_START_Y     64
+#define PADDLE_START_Y   53
+#define SCORE_TO_WIN     5
+#define SCORE_Y          2
+
+#define PADDLE_SPEED     4
+#define BALL_SPEED_X     1
+#define BALL_SPEED_Y     1
+
+#define SPEED_UP_INTERVAL   500
+#define MAX_SPEED_LEVEL     5
+
+#define PADDLE_MIN_Y     2
+#define PADDLE_MAX_Y     (FIELD_HEIGHT - PADDLE_HEIGHT - 2)
+
+/*============================================================================
+ * CONFIGURARE JOYSTICK (ADC)
+ *============================================================================*/
+
+#define JOYSTICK_VRX_CHANNEL 8U
+#define JOYSTICK_VRY_CHANNEL 9U
+
+#define JOYSTICK_SW_PIN      4U
+#define JOYSTICK_SW_PORT     PORTD
+#define JOYSTICK_SW_GPIO     GPIOD
+#define JOYSTICK_SW_IRQ      PORTD_IRQn
+
+#define JOY_MENU_DEADZONE        10
+#define JOY_MENU_THRESHOLD       25
+
+#define JOY_BTN_DEBOUNCE_MS  250
+
+static volatile uint32_t g_joy_last_press_time = 0;
+
+
+
+static volatile bool g_joy_btn_pressed = false;
+static int16_t g_joy_y_percent = 0;
+static bool g_joy_action_consumed = false;
+
+/*============================================================================
+ * CONFIGURARE LED-URI ARCADE (2 LED-uri externe)
+ *============================================================================*/
+
+// LED Player 1 - PTE20 (LED extern CYAN/ALBASTRU)
+#define LED_P1_GPIO      GPIOE
+#define LED_P1_PORT      PORTE
+#define LED_P1_PIN       20U
+
+// LED Player 2 - PTE21 (LED extern ROSU/MAGENTA)
+#define LED_P2_GPIO      GPIOE
+#define LED_P2_PORT      PORTE
+#define LED_P2_PIN       21U
+
+// Macro-uri control LED (Active LOW - LED conectat intre pin si VCC prin rezistor)
+#define LED_P1_ON()      GPIO_ClearPinsOutput(LED_P1_GPIO, 1U << LED_P1_PIN)
+#define LED_P1_OFF()     GPIO_SetPinsOutput(LED_P1_GPIO, 1U << LED_P1_PIN)
+#define LED_P1_TOGGLE()  GPIO_TogglePinsOutput(LED_P1_GPIO, 1U << LED_P1_PIN)
+
+#define LED_P2_ON()      GPIO_ClearPinsOutput(LED_P2_GPIO, 1U << LED_P2_PIN)
+#define LED_P2_OFF()     GPIO_SetPinsOutput(LED_P2_GPIO, 1U << LED_P2_PIN)
+#define LED_P2_TOGGLE()  GPIO_TogglePinsOutput(LED_P2_GPIO, 1U << LED_P2_PIN)
+
+// Macro-uri pentru ambele LED-uri
+#define LEDS_BOTH_ON()   do { LED_P1_ON(); LED_P2_ON(); } while(0)
+#define LEDS_BOTH_OFF()  do { LED_P1_OFF(); LED_P2_OFF(); } while(0)
+
+/*============================================================================
+ * CONFIGURARE BUZZER PIEZO (TPM2_CH0 pe PTB2)
+ *============================================================================*/
+
+#define BUZZER_PORT      PORTB
+#define BUZZER_PIN       2U
+#define BUZZER_TPM       TPM2
+#define BUZZER_CHANNEL   0U
+
+// Frecvente note muzicale (Hz) - pentru melodia "The Metro" in B minor
+// Frecvente note muzicale (Hz) - TEST frecvente joase
+#define NOTE_B2   150   // Foarte grav
+#define NOTE_C3   160
+#define NOTE_D3   170
+#define NOTE_E2   130
+#define NOTE_FS2  140
+#define NOTE_G2   145
+#define NOTE_A2   155
+#define NOTE_B3   180
+#define NOTE_REST 0
+
+// Variabila globala pentru starea sunetului
+static volatile uint8_t g_sound_enabled = 1;
+
+/*============================================================================
+ * CONFIGURARE IR REMOTE
+ *============================================================================*/
+
+#define IR_PIN 12u
+#define IR_GPIO GPIOA
+#define IR_PORT PORTA
+#define IR_IRQ  PORTA_IRQn
+
+#define TICKS_US_FACTOR      1.5f
+#define NEC_HDR_MARK_MIN     12000
+#define NEC_HDR_SPACE_MIN    6000
+#define NEC_BIT_THRESHOLD    2500
+#define GLITCH_THRESHOLD     100
+
+volatile uint32_t ir_code = 0;
+volatile uint8_t ir_ready = 0;
+volatile uint32_t pulse_count = 0;
+volatile uint32_t pulse_buffer[100];
+volatile uint8_t capture_complete = 0;
+volatile uint32_t last_ir_code = 0;
+volatile uint32_t last_ir_time = 0;
+
+/* === NOU: Stare IR pentru gameplay === */
+static int8_t g_ir_current_direction = 0;
+static uint32_t g_ir_last_input_time = 0;
+#define IR_INPUT_TIMEOUT_MS  150
+
+#define IR_DEBOUNCE_MS 200
+#define IR_GAME_DEBOUNCE_MS 80
+
+#define IR_KEY_UP       0xE718FF00
+#define IR_KEY_DOWN     0xAD52FF00
+#define IR_KEY_LEFT     0xF708FF00
+#define IR_KEY_RIGHT    0xA55AFF00
+#define IR_KEY_OK       0xE31CFF00
+#define IR_KEY_POWER    0xBA45FF00
+#define IR_KEY_BACK     0xF807FF00
+
+/*============================================================================
+ * CONSTANTE PENTRU UI
+ *============================================================================*/
+
+#define MENU_START_Y      35
+#define MENU_ITEM_HEIGHT  14
+#define MENU_MARGIN_X     10
+#define TITLE_Y           8
+
+#define COLOR_BG          COLOR_BLACK
+#define COLOR_TITLE       COLOR_CYAN
+#define COLOR_NORMAL      COLOR_WHITE
+#define COLOR_SELECTED    COLOR_YELLOW
+#define COLOR_DISABLED    COLOR_GRAY
+#define COLOR_HIGHLIGHT   COLOR_GREEN
+#define COLOR_BACK        COLOR_ORANGE
+
+/*============================================================================
+ * TIMING CU PIT PENTRU UPDATE FPS
+ *============================================================================*/
+
+volatile uint8_t g_game_tick = 0;   // se seteaza la fiecare 20 ms (GAME_FRAME_MS)
+volatile uint8_t g_menu_tick = 0;   // se seteaza la fiecare 50 ms (MENU_FRAME_MS)
+#define GAME_FRAME_MS 20
+#define MENU_FRAME_MS 50
+
+
+/*============================================================================
+ * SYSTICK TIMER
+ *============================================================================*/
+
+static volatile uint32_t g_systick_ms = 0;
+
+void SysTick_Handler(void) {
+    g_systick_ms++;
+}
+
+void Timer_Init(void) {
+    SysTick_Config(SystemCoreClock / 1000U);
+    PRINTF("Timer initialized (SysTick 1ms)\r\n");
+}
+
+uint32_t Timer_GetMs(void) {
+    return g_systick_ms;
+}
+
+void delay_ms(uint32_t ms) {
+    uint32_t start = g_systick_ms;
+    while ((g_systick_ms - start) < ms) {
+        __WFI();
+    }
+}
+
+bool Timer_Elapsed(uint32_t start_time, uint32_t duration_ms) {
+    return ((g_systick_ms - start_time) >= duration_ms);
+}
+
+/*============================================================================
+ * PIT TIMER PENTRU GAME/MENU UPDATE
+ *============================================================================*/
+
+void PIT_Init(void) {
+    /* Clock la modulul PIT */
+    SIM->SCGC6 |= SIM_SCGC6_PIT_MASK;
+
+    /* Enable PIT, freeze in debug */
+    PIT->MCR &= ~PIT_MCR_MDIS_MASK;
+    PIT->MCR |= PIT_MCR_FRZ_MASK;
+
+    /* Frecvența bus clock – pe FRDM-KL25Z tipic este SystemCoreClock/2 */
+    uint32_t busClock = SystemCoreClock / 2U;
+
+    /* Perioade în tick-uri pentru ch0 (game) și ch1 (menu) */
+    uint32_t gamePeriod = (busClock * GAME_FRAME_MS / 1000U) - 1U;  // ~20ms
+    uint32_t menuPeriod = (busClock * MENU_FRAME_MS / 1000U) - 1U;  // ~50ms
+
+    /* Channel 0 – update joc */
+    PIT->CHANNEL[0].LDVAL = PIT_LDVAL_TSV(gamePeriod);
+    PIT->CHANNEL[0].TCTRL = PIT_TCTRL_TIE_MASK;  // interrupt enable
+
+    /* Channel 1 – update meniu */
+    PIT->CHANNEL[1].LDVAL = PIT_LDVAL_TSV(menuPeriod);
+    PIT->CHANNEL[1].TCTRL = PIT_TCTRL_TIE_MASK;  // interrupt enable
+
+    /* NVIC pentru PIT (canalele împart același IRQ) */
+    NVIC_SetPriority(PIT_IRQn, 3);
+    NVIC_ClearPendingIRQ(PIT_IRQn);
+    NVIC_EnableIRQ(PIT_IRQn);
+
+    /* Pornim ambele canale */
+    PIT->CHANNEL[0].TCTRL |= PIT_TCTRL_TEN_MASK;
+    PIT->CHANNEL[1].TCTRL |= PIT_TCTRL_TEN_MASK;
+
+    PRINTF("PIT initialized (CH0=%d ms, CH1=%d ms)\r\n", GAME_FRAME_MS, MENU_FRAME_MS);
+}
+
+void PIT_IRQHandler(void) {
+    /* Channel 0 – tick pentru gameplay */
+    if (PIT->CHANNEL[0].TFLG & PIT_TFLG_TIF_MASK) {
+        PIT->CHANNEL[0].TFLG = PIT_TFLG_TIF_MASK;   // clear flag
+        g_game_tick = 1;
+    }
+
+    /* Channel 1 – tick pentru meniuri */
+    if (PIT->CHANNEL[1].TFLG & PIT_TFLG_TIF_MASK) {
+        PIT->CHANNEL[1].TFLG = PIT_TFLG_TIF_MASK;   // clear flag
+        g_menu_tick = 1;
+    }
+}
+
+
+/*============================================================================
+ * FUNCTII LED ARCADE
+ *============================================================================*/
+
+void LED_Arcade_Init(void) {
+    // Enable clock pentru PORTE
+    CLOCK_EnableClock(kCLOCK_PortE);
+
+    // Configurare pini ca GPIO output
+    PORT_SetPinMux(LED_P1_PORT, LED_P1_PIN, kPORT_MuxAsGpio);
+    PORT_SetPinMux(LED_P2_PORT, LED_P2_PIN, kPORT_MuxAsGpio);
+
+    // Configurare ca output, initial OFF (HIGH pentru active-low)
+    gpio_pin_config_t led_config = {kGPIO_DigitalOutput, 1};
+    GPIO_PinInit(LED_P1_GPIO, LED_P1_PIN, &led_config);
+    GPIO_PinInit(LED_P2_GPIO, LED_P2_PIN, &led_config);
+
+    // Test flash la startup - confirma ca LED-urile functioneaza
+    LED_P1_ON(); LED_P2_ON();
+    delay_ms(150);
+    LED_P1_OFF(); LED_P2_OFF();
+    delay_ms(100);
+    LED_P1_ON(); LED_P2_ON();
+    delay_ms(150);
+    LED_P1_OFF(); LED_P2_OFF();
+
+    PRINTF("LED Arcade initialized (P1=PTE20, P2=PTE21)\r\n");
+}
+
+// Flash pentru gol - numarul de flash-uri = scorul jucatorului
+void LED_GoalFlash(uint8_t player, uint8_t score) {
+    for (uint8_t i = 0; i < score; i++) {
+        if (player == 1) {
+            LED_P1_ON();
+        } else {
+            LED_P2_ON();
+        }
+        delay_ms(100);
+        if (player == 1) {
+            LED_P1_OFF();
+        } else {
+            LED_P2_OFF();
+        }
+        delay_ms(80);
+    }
+}
+
+// Flash pentru ambele LED-uri simultan
+void LED_BothFlash(uint8_t times, uint16_t on_ms, uint16_t off_ms) {
+    for (uint8_t i = 0; i < times; i++) {
+        LEDS_BOTH_ON();
+        delay_ms(on_ms);
+        LEDS_BOTH_OFF();
+        delay_ms(off_ms);
+    }
+}
+
+// Flash alternativ intre cele 2 LED-uri (celebration effect)
+void LED_AlternatingFlash(uint8_t times, uint16_t period_ms) {
+    for (uint8_t i = 0; i < times; i++) {
+        LED_P1_ON(); LED_P2_OFF();
+        delay_ms(period_ms);
+        LED_P1_OFF(); LED_P2_ON();
+        delay_ms(period_ms);
+    }
+    LED_P2_OFF();
+}
+
+// Victory pulse pentru castigator - pulsuri lente
+void LED_VictoryPulse(uint8_t winner) {
+    for (uint8_t i = 0; i < 5; i++) {
+        if (winner == 1) {
+            LED_P1_ON();
+        } else {
+            LED_P2_ON();
+        }
+        delay_ms(200);
+        if (winner == 1) {
+            LED_P1_OFF();
+        } else {
+            LED_P2_OFF();
+        }
+        delay_ms(150);
+    }
+}
+
+/*============================================================================
+ * FUNCTII BUZZER PIEZO
+ *============================================================================*/
+
+void Buzzer_Init(void) {
+    // Enable clock pentru PORTB si TPM2
+    CLOCK_EnableClock(kCLOCK_PortB);
+    CLOCK_EnableClock(kCLOCK_Tpm2);
+
+    // Configureaza PTB2 ca TPM2_CH0 (ALT3)
+    PORT_SetPinMux(BUZZER_PORT, BUZZER_PIN, kPORT_MuxAlt3);
+
+    // Configureaza sursa clock pentru TPM2
+    CLOCK_SetTpmClock(1U);  // MCGFLLCLK sau MCGPLLCLK/2
+
+    // Reset TPM2
+    BUZZER_TPM->SC = 0;
+    BUZZER_TPM->CNT = 0;
+    BUZZER_TPM->MOD = 0xFFFF;
+
+    // Configureaza canalul 0 pentru PWM edge-aligned, high-true
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnSC = TPM_CnSC_MSB_MASK | TPM_CnSC_ELSB_MASK;
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;  // Duty cycle 0 (off)
+
+    // Porneste TPM2 cu prescaler 1 (48MHz / 1 = 48MHz)
+    BUZZER_TPM->SC = TPM_SC_CMOD(1) | TPM_SC_PS(0);
+
+    PRINTF("Buzzer initialized (PTB2, TPM2_CH0)\r\n");
+}
+
+void Buzzer_Tone(uint16_t frequency, uint16_t duration_ms) {
+    if (!g_sound_enabled || frequency == 0) {
+        // Pauza sau sunet dezactivat
+        BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;
+        if (duration_ms > 0) {
+            delay_ms(duration_ms);
+        }
+        return;
+    }
+
+    // Calculeaza MOD pentru frecventa dorita
+    // Clock TPM = 48MHz, frecventa = 48MHz / (MOD + 1)
+    // MOD = (48MHz / frecventa) - 1
+    uint32_t mod_value = (48000000U / frequency) - 1;
+    if (mod_value > 0xFFFF) mod_value = 0xFFFF;
+
+    BUZZER_TPM->CNT = 0;
+    BUZZER_TPM->MOD = mod_value;
+
+    // Duty cycle 50% pentru sunet puternic
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = mod_value / 2;
+
+    if (duration_ms > 0) {
+        delay_ms(duration_ms);
+        // Opreste sunetul dupa durata
+        BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;
+    }
+}
+
+void Buzzer_Off(void) {
+    BUZZER_TPM->CONTROLS[BUZZER_CHANNEL].CnV = 0;
+}
+
+void Buzzer_SetEnabled(uint8_t enabled) {
+    g_sound_enabled = enabled;
+    if (!enabled) {
+        Buzzer_Off();
+    }
+}
+
+
+// Efect sonor pentru gol
+void Buzzer_GoalSound(void) {
+    if (!g_sound_enabled) return;
+
+    // Sunet ascendent de celebrare
+    Buzzer_Tone(330, 80);   // E4
+    Buzzer_Tone(392, 80);   // G4
+    Buzzer_Tone(523, 80);   // C5
+    Buzzer_Tone(659, 150);  // E5
+    Buzzer_Off();
+}
+
+// Efect sonor pentru start joc
+void Buzzer_StartSound(void) {
+    if (!g_sound_enabled) return;
+
+    Buzzer_Tone(440, 150);  // A4
+    delay_ms(50);
+    Buzzer_Tone(880, 200);  // A5
+    Buzzer_Off();
+}
+
+// Efect sonor pentru game over
+void Buzzer_GameOverSound(void) {
+    if (!g_sound_enabled) return;
+
+    Buzzer_Tone(392, 200);  // G4
+    Buzzer_Tone(330, 200);  // E4
+    Buzzer_Tone(262, 400);  // C4
+    Buzzer_Off();
+}
+
+/*============================================================================
+ * FUNCTII HELPER
+ *============================================================================*/
+
+const char* GetInputName(InputType_t input) {
+    switch (input) {
+        case INPUT_JOYSTICK:  return "Joystick";
+        case INPUT_REMOTE:    return "Remote";
+        case INPUT_GYROSCOPE: return "Gyro";
+        case INPUT_CPU_EASY:  return "CPU Easy";
+        case INPUT_CPU_MEDIUM: return "CPU Med";
+        case INPUT_CPU_HARD:  return "CPU Hard";
+        default:              return "None";
+    }
+}
+
+bool IsCPUInput(InputType_t input) {
+    return (input == INPUT_CPU_EASY || input == INPUT_CPU_MEDIUM || input == INPUT_CPU_HARD);
+}
+
+bool IsInputAvailable(InputType_t input, uint8_t forPlayer) {
+    if (input == INPUT_NONE) return true;
+    if (IsCPUInput(input)) return true;
+
+    if (forPlayer == 1) {
+        if (g_player2_input == input) return false;
+    } else {
+        if (g_player1_input == input) return false;
+    }
+    return true;
+}
+
+void UI_PrintStats(void) {
+    uint32_t now = Timer_GetMs();
+    if ((now - g_ui_timers.last_fps_print) >= 5000) {
+        g_ui_timers.last_fps_print = now;
+
+        if (g_currentScreen == SCREEN_GAMEPLAY) {
+            float fps = (float)g_ui_timers.frame_count / 5.0f;
+            PRINTF("[UI STATS] FPS: %f | Ball draws: %d | Paddle draws: %d\r\n",
+                   fps, g_ui_timers.ball_draw_count, g_ui_timers.paddle_draw_count);
+            PRINTF("[UI TIMERS] Ball: %d ms | Paddle: %d ms | Update: %d ms\r\n",
+                   g_ui_timers.last_ball_draw_time, g_ui_timers.last_paddle_draw_time,
+                   g_ui_timers.last_game_update_time);
+        }
+
+        g_ui_timers.frame_count = 0;
+        g_ui_timers.ball_draw_count = 0;
+        g_ui_timers.paddle_draw_count = 0;
+    }
+}
+
+/*============================================================================
+ * FUNCTII JOYSTICK
+ *============================================================================*/
+
+void PORTD_IRQHandler(void) {
+    uint32_t isfr = PORT_GetPinsInterruptFlags(JOYSTICK_SW_PORT);
+
+    if (isfr & (1U << JOYSTICK_SW_PIN)) {
+        PORT_ClearPinsInterruptFlags(JOYSTICK_SW_PORT, 1U << JOYSTICK_SW_PIN);
+
+        uint32_t now = Timer_GetMs();
+
+        // Debounce: ignoră impulsurile care vin prea repede (bounce / "double click" fals)
+        if ((now - g_joy_last_press_time) < JOY_BTN_DEBOUNCE_MS) {
+            return; // IGNORE
+        }
+
+        g_joy_last_press_time = now;
+
+        // Dacă deja e setat "pressed", nu mai seta încă o dată
+        if (!g_joy_btn_pressed) {
+            g_joy_btn_pressed = true;
+        }
+    }
+}
+
+
+static uint16_t Joystick_ReadADC(uint32_t channel) {
+    adc16_channel_config_t chConfig = {
+        .channelNumber = channel,
+        .enableInterruptOnConversionCompleted = false,
+        .enableDifferentialConversion = false
+    };
+    ADC16_SetChannelConfig(ADC0, 0, &chConfig);
+    while (0U == (kADC16_ChannelConversionDoneFlag & ADC16_GetChannelStatusFlags(ADC0, 0)));
+    return ADC16_GetChannelConversionValue(ADC0, 0);
+}
+
+void Joystick_Init(void) {
+    adc16_config_t adcConfig;
+
+    CLOCK_EnableClock(kCLOCK_Adc0);
+    CLOCK_EnableClock(kCLOCK_PortB);
+    CLOCK_EnableClock(kCLOCK_PortD);
+
+    ADC16_GetDefaultConfig(&adcConfig);
+    adcConfig.resolution = kADC16_ResolutionSE12Bit;
+    ADC16_Init(ADC0, &adcConfig);
+    ADC16_DoAutoCalibration(ADC0);
+
+    PORT_SetPinMux(JOYSTICK_SW_PORT, JOYSTICK_SW_PIN, kPORT_MuxAsGpio);
+    JOYSTICK_SW_PORT->PCR[JOYSTICK_SW_PIN] |= PORT_PCR_PE_MASK | PORT_PCR_PS_MASK;
+
+    gpio_pin_config_t sw_config = {kGPIO_DigitalInput, 0};
+    GPIO_PinInit(JOYSTICK_SW_GPIO, JOYSTICK_SW_PIN, &sw_config);
+
+    PORT_SetPinInterruptConfig(JOYSTICK_SW_PORT, JOYSTICK_SW_PIN, kPORT_InterruptFallingEdge);
+
+    NVIC_SetPriority(JOYSTICK_SW_IRQ, 3);
+    EnableIRQ(JOYSTICK_SW_IRQ);
+
+    PRINTF("Joystick initialized (VRY=PTB1, SW=PTD4)\r\n");
+}
+
+void Joystick_Process(void) {
+    uint16_t y_raw = Joystick_ReadADC(JOYSTICK_VRY_CHANNEL);
+    g_joy_y_percent = ((int32_t)y_raw - 2048) * 100 / 2048;
+
+    if (g_joy_y_percent > -JOY_MENU_DEADZONE && g_joy_y_percent < JOY_MENU_DEADZONE) {
+        g_joy_action_consumed = false;
+    }
+
+}
+
+typedef enum {
+    JOY_ACTION_NONE = 0,
+    JOY_ACTION_UP,
+    JOY_ACTION_DOWN,
+    JOY_ACTION_SELECT
+} JoyAction_t;
+
+JoyAction_t Joystick_GetMenuAction(void) {
+    if (g_joy_btn_pressed) {
+        g_joy_btn_pressed = false;
+        return JOY_ACTION_SELECT;
+    }
+
+    if (!g_joy_action_consumed) {
+        if (g_joy_y_percent > JOY_MENU_THRESHOLD) {
+            g_joy_action_consumed = true;
+            return JOY_ACTION_DOWN;
+        }
+        if (g_joy_y_percent < -JOY_MENU_THRESHOLD) {
+            g_joy_action_consumed = true;
+            return JOY_ACTION_UP;
+        }
+    }
+
+    return JOY_ACTION_NONE;
+}
+
+int16_t Joystick_GetY_Percent(void) {
+    return g_joy_y_percent;
+}
+
+/*============================================================================
+ * FUNCTII IR REMOTE
+ *============================================================================*/
+
+void TPM0_IRQHandler(void) {
+    if (TPM0->SC & TPM_SC_TOF_MASK) {
+        TPM0->SC |= TPM_SC_TOF_MASK;
+
+        if (pulse_count >= 66) {
+            capture_complete = 1;
+            ir_ready = 1;
+        } else if (pulse_count >= 2 && pulse_count <= 4) {
+            capture_complete = 1;
+            ir_ready = 1;
+        } else {
+            pulse_count = 0;
+            capture_complete = 0;
+        }
+    }
+}
+
+void PORTA_IRQHandler(void) {
+    uint32_t isfr = PORT_GetPinsInterruptFlags(IR_PORT);
+
+    if (isfr & (1U << IR_PIN)) {
+        PORT_ClearPinsInterruptFlags(IR_PORT, 1U << IR_PIN);
+
+        if (!capture_complete) {
+            uint32_t current_val = TPM0->CNT;
+            TPM0->CNT = 0;
+
+            if (current_val > GLITCH_THRESHOLD) {
+                if (pulse_count < 100) {
+                    pulse_buffer[pulse_count++] = current_val;
+                }
+            }
+        }
+    }
+}
+
+void IR_DecodeNEC(void) {
+    ir_code = 0;
+
+    if (pulse_count >= 2 && pulse_count <= 4) {
+        if (pulse_buffer[0] > 12000 && pulse_buffer[0] < 15000) {
+            if (pulse_count >= 2 && pulse_buffer[1] > 2000 && pulse_buffer[1] < 4500) {
+                ir_code = last_ir_code;
+                return;
+            }
+        }
+    }
+
+    int start_index = -1;
+    if (pulse_buffer[0] > 12000 && pulse_buffer[0] < 15000) start_index = 0;
+    else if (pulse_count > 1 && pulse_buffer[1] > 12000 && pulse_buffer[1] < 15000) start_index = 1;
+
+    if (start_index == -1) return;
+
+    uint32_t hdr_space = pulse_buffer[start_index + 1];
+
+    if (hdr_space < 4000) {
+        ir_code = last_ir_code;
+        return;
+    }
+
+    for (int i = 0; i < 32; i++) {
+        int idx = start_index + 3 + (i * 2);
+        if (idx >= (int)pulse_count) break;
+
+        uint32_t space_duration = pulse_buffer[idx];
+        if (space_duration > 1600) {
+            ir_code |= (1UL << i);
+        }
+    }
+
+    if (ir_code != 0) {
+        last_ir_code = ir_code;
+    }
+}
+
+void IR_Init(void) {
+    CLOCK_EnableClock(kCLOCK_PortA);
+    PORT_SetPinMux(IR_PORT, IR_PIN, kPORT_MuxAsGpio);
+
+    IR_PORT->PCR[IR_PIN] |= PORT_PCR_PE_MASK | PORT_PCR_PS_MASK;
+
+    gpio_pin_config_t gpioPinConfig = { kGPIO_DigitalInput, 0 };
+    GPIO_PinInit(IR_GPIO, IR_PIN, &gpioPinConfig);
+
+    PORT_SetPinInterruptConfig(IR_PORT, IR_PIN, kPORT_InterruptEitherEdge);
+
+    NVIC_SetPriority(IR_IRQ, 2);
+    EnableIRQ(IR_IRQ);
+
+    PRINTF("IR Remote initialized (Pin=PTA12)\r\n");
+}
+
+void TPM0_Init(void) {
+    CLOCK_EnableClock(kCLOCK_Tpm0);
+    CLOCK_SetTpmClock(1U);
+
+    TPM0->SC = 0;
+    TPM0->CNT = 0;
+    TPM0->MOD = 0xFFFF;
+
+    TPM0->SC = TPM_SC_PS(5) | TPM_SC_TOIE_MASK | TPM_SC_CMOD(1);
+
+    NVIC_SetPriority(TPM0_IRQn, 3);
+    EnableIRQ(TPM0_IRQn);
+}
+
+JoyAction_t IR_GetMenuAction(void) {
+    if (!ir_ready) return JOY_ACTION_NONE;
+
+    uint32_t now = Timer_GetMs();
+    if ((now - last_ir_time) < IR_DEBOUNCE_MS) {
+        ir_ready = 0;
+        capture_complete = 0;
+        pulse_count = 0;
+        return JOY_ACTION_NONE;
+    }
+
+    IR_DecodeNEC();
+
+    JoyAction_t action = JOY_ACTION_NONE;
+
+    if (ir_code != 0) {
+        last_ir_time = now;
+
+        switch (ir_code) {
+            case IR_KEY_UP:    action = JOY_ACTION_UP; break;
+            case IR_KEY_DOWN:  action = JOY_ACTION_DOWN; break;
+            case IR_KEY_OK:    action = JOY_ACTION_SELECT; break;
+            default: break;
+        }
+
+        PRINTF("[IR MENU] Code: 0x%08X -> Action: %d\r\n", ir_code, action);
+    }
+
+    ir_ready = 0;
+    capture_complete = 0;
+    pulse_count = 0;
+
+    return action;
+}
+
+/* === NOU: Proceseaza IR pentru gameplay === */
+void IR_ProcessGameInput(void) {
+    uint32_t now = Timer_GetMs();
+
+    /* Timeout - opreste miscarea daca nu vine semnal */
+    if ((now - g_ir_last_input_time) > IR_INPUT_TIMEOUT_MS) {
+        g_ir_current_direction = 0;
+    }
+
+    if (!ir_ready) return;
+
+    if ((now - last_ir_time) < IR_GAME_DEBOUNCE_MS) {
+        ir_ready = 0;
+        capture_complete = 0;
+        pulse_count = 0;
+        return;
+    }
+
+    IR_DecodeNEC();
+
+    if (ir_code != 0) {
+        last_ir_time = now;
+        g_ir_last_input_time = now;
+
+        switch (ir_code) {
+            case IR_KEY_UP:
+                g_ir_current_direction = -1;
+                PRINTF("[IR GAME] UP\r\n");
+                break;
+            case IR_KEY_DOWN:
+                g_ir_current_direction = 1;
+                PRINTF("[IR GAME] DOWN\r\n");
+                break;
+            case IR_KEY_OK:
+            case IR_KEY_POWER:
+                break;
+            default:
+                g_ir_current_direction = 0;
+                break;
+        }
+    }
+
+    ir_ready = 0;
+    capture_complete = 0;
+    pulse_count = 0;
+}
+
+int8_t IR_GetCurrentDirection(void) {
+    return g_ir_current_direction;
+}
+
+void IR_ResetGameState(void) {
+    g_ir_current_direction = 0;
+    g_ir_last_input_time = 0;
+    ir_ready = 0;
+    capture_complete = 0;
+    pulse_count = 0;
+}
+
+bool IR_CheckPauseOnly(void) {
+    if (!ir_ready) return false;
+
+    uint32_t now = Timer_GetMs();
+    if ((now - last_ir_time) < IR_DEBOUNCE_MS) return false;
+
+    IR_DecodeNEC();
+
+    if (ir_code == IR_KEY_OK || ir_code == IR_KEY_POWER) {
+        last_ir_time = now;
+        ir_ready = 0;
+        capture_complete = 0;
+        pulse_count = 0;
+        PRINTF("[IR] Pause detected\r\n");
+        return true;
+    }
+
+    return false;
+}
+
+bool IR_IsPausePressed(void) {
+    if (!ir_ready) return false;
+
+    uint32_t now = Timer_GetMs();
+    if ((now - last_ir_time) < IR_DEBOUNCE_MS) {
+        ir_ready = 0;
+        capture_complete = 0;
+        pulse_count = 0;
+        return false;
+    }
+
+    IR_DecodeNEC();
+
+    bool pause_pressed = false;
+
+    if (ir_code == IR_KEY_OK || ir_code == IR_KEY_POWER) {
+        pause_pressed = true;
+        last_ir_time = now;
+    }
+
+    ir_ready = 0;
+    capture_complete = 0;
+    pulse_count = 0;
+
+    return pause_pressed;
+}
+/*============================================================================
+ * FUNCTII GYROSCOPE / ESP (UART1)
+ *============================================================================*/
+
+#define GYRO_UART UART1
+#define GYRO_UART_CLKSRC kCLOCK_BusClk
+#define GYRO_BAUD_RATE 115200
+#define GYRO_BUFFER_SIZE 64
+
+static char g_gyro_rx_buffer[GYRO_BUFFER_SIZE];
+static uint8_t g_gyro_rx_index = 0;
+
+static float  g_gyro_angle = 0.0f;
+static int16_t g_gyro_paddle_y = PADDLE_START_Y;
+static uint32_t g_last_gyro_update = 0;
+
+void Gyro_Init(void) {
+    uart_config_t config;
+
+    CLOCK_EnableClock(kCLOCK_PortE);
+    CLOCK_EnableClock(kCLOCK_Uart1);
+
+    PORT_SetPinMux(PORTE, 0U, kPORT_MuxAlt3); // PTE0 = TX
+    PORT_SetPinMux(PORTE, 1U, kPORT_MuxAlt3); // PTE1 = RX
+
+    UART_GetDefaultConfig(&config);
+    config.baudRate_Bps = GYRO_BAUD_RATE;
+    config.enableTx = true;
+    config.enableRx = true;
+
+    UART_Init(GYRO_UART, &config, CLOCK_GetFreq(GYRO_UART_CLKSRC));
+
+    UART_DisableInterrupts(GYRO_UART,
+        kUART_RxDataRegFullInterruptEnable | kUART_RxOverrunInterruptEnable);
+
+    PRINTF("Gyroscope/ESP initialized (UART1, PTE0/PTE1)\r\n");
+}
+
+// ==> versiune aproape identica cu Check_UART_Data din codul care merge
+int Gyro_Check_UART_Data(void) {
+    uint32_t flags = UART_GetStatusFlags(GYRO_UART);
+
+    if (flags & (kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag)) {
+        UART_ClearStatusFlags(GYRO_UART,
+                              kUART_RxOverrunFlag | kUART_NoiseErrorFlag | kUART_FramingErrorFlag);
+        g_gyro_rx_index = 0;
+        return 0;
+    }
+
+    if (flags & kUART_RxDataRegFullFlag) {
+        uint8_t data = UART_ReadByte(GYRO_UART);
+
+        if (data == '\n' || data == '\r') {
+            if (g_gyro_rx_index > 0) {
+                g_gyro_rx_buffer[g_gyro_rx_index] = 0;
+                g_gyro_rx_index = 0;
+                return 1;    // avem linie completă
+            }
+        } else {
+            if (g_gyro_rx_index < GYRO_BUFFER_SIZE - 1) {
+                g_gyro_rx_buffer[g_gyro_rx_index++] = data;
+            }
+        }
+    }
+    return 0;
+}
+
+// mapping adaptat la PADDLE_MIN_Y / MAX_Y din joc
+int16_t Map_Angle_To_Paddle(float angle) {
+    if (angle > 45.0f) angle = 45.0f;
+    if (angle < -45.0f) angle = -45.0f;
+
+    // -45 -> jos, +45 -> sus
+    float normalized = (angle + 45.0f) / 90.0f;   // [0..1]
+    int16_t y = PADDLE_MAX_Y - (int16_t)(normalized * (PADDLE_MAX_Y - PADDLE_MIN_Y));
+
+    if (y < PADDLE_MIN_Y) y = PADDLE_MIN_Y;
+    if (y > PADDLE_MAX_Y) y = PADDLE_MAX_Y;
+    return y;
+}
+
+// directia busolei, ca in codul tau
+const char* Gyro_GetCompassDir(float heading) {
+    if (heading >= 337.5 || heading < 22.5)  return "NORD";
+    if (heading >= 22.5  && heading < 67.5)  return "N-EST";
+    if (heading >= 67.5  && heading < 112.5) return "EST";
+    if (heading >= 112.5 && heading < 157.5) return "S-EST";
+    if (heading >= 157.5 && heading < 202.5) return "SUD";
+    if (heading >= 202.5 && heading < 247.5) return "S-VEST";
+    if (heading >= 247.5 && heading < 292.5) return "VEST";
+    if (heading >= 292.5 && heading < 337.5) return "N-VEST";
+    return "???";
+}
+
+// === EXACT ca Process_Data din codul mic, doar ca scriem in g_gyro_paddle_y
+void Gyro_Process_Data(char* input) {
+    int ang = 0;
+    int head = 0;
+
+    char* p1 = strchr(input, ',');
+    if (p1) {
+        *p1 = 0;
+        ang = atoi(input);
+
+        char* p2 = strchr(p1 + 1, ',');
+        if (p2) {
+            *p2 = 0;
+            head = atoi(p2 + 1);
+        }
+    }
+
+    g_gyro_angle = (float)ang;
+    float compassHeading = (float)head;
+    g_gyro_paddle_y = Map_Angle_To_Paddle(g_gyro_angle);
+    g_last_gyro_update = Timer_GetMs();
+
+    char directionStr[20];
+    if (ang > 3) {
+        strcpy(directionStr, "SUS (Dreapta)");
+    } else if (ang < -3) {
+        strcpy(directionStr, "JOS (Stanga)");
+    } else {
+        strcpy(directionStr, "CENTRU");
+    }
+
+    char semn = (ang >= 0) ? '+' : '-';
+    const char* compassDir = Gyro_GetCompassDir(compassHeading);
+
+    PRINTF("Inclinatie: %c%d [%s] | Y: %d | Busola: %d (%s)\r\n",
+           semn,
+           abs(ang),
+           directionStr,
+           g_gyro_paddle_y,
+           head,
+           compassDir);
+}
+
+int16_t Gyro_GetPaddleY(void) {
+    return g_gyro_paddle_y;
+}
+
+bool Gyro_IsActive(void) {
+    return (Timer_GetMs() - g_last_gyro_update) < 500;
+}
+
+
+/*============================================================================
+ * FUNCTII AI / BOT
+ *============================================================================*/
+
+int16_t AI_PredictBallY(int16_t target_x) {
+    int16_t sim_x = ball.x;
+    int16_t sim_y = ball.y;
+    int16_t sim_dx = ball.dx;
+    int16_t sim_dy = ball.dy;
+
+    int iterations = 0;
+    while (iterations < 200) {
+        sim_x += sim_dx;
+        sim_y += sim_dy;
+
+        if (sim_y <= 2 || sim_y >= FIELD_HEIGHT - BALL_SIZE - 2) {
+            sim_dy = -sim_dy;
+            if (sim_y <= 2) sim_y = 3;
+            if (sim_y >= FIELD_HEIGHT - BALL_SIZE - 2) sim_y = FIELD_HEIGHT - BALL_SIZE - 3;
+        }
+
+        if ((sim_dx > 0 && sim_x >= target_x) || (sim_dx < 0 && sim_x <= target_x)) {
+            return sim_y;
+        }
+
+        iterations++;
+    }
+
+    return FIELD_HEIGHT / 2;
+}
+
+void AI_UpdatePaddle(Paddle_t* paddle, bool is_right_side) {
+    int16_t paddle_center = paddle->y + PADDLE_HEIGHT / 2;
+    int16_t target_y;
+    int16_t speed;
+    int16_t reaction_zone;
+    int16_t error_margin;
+    int16_t mistake_chance;
+    int16_t update_interval;
+
+    switch (paddle->input) {
+        case INPUT_CPU_EASY:
+            speed = 1; reaction_zone = 35; error_margin = 35;
+            mistake_chance = 35; update_interval = 20;
+            break;
+        case INPUT_CPU_MEDIUM:
+            speed = 2; reaction_zone = 80; error_margin = 15;
+            mistake_chance = 12; update_interval = 10;
+            break;
+        case INPUT_CPU_HARD:
+            speed = 4; reaction_zone = 160; error_margin = 5;
+            mistake_chance = 0; update_interval = 3;
+            break;
+        default:
+            return;
+    }
+
+    bool ball_coming = (is_right_side && ball.dx > 0) || (!is_right_side && ball.dx < 0);
+
+    if (ball_coming) {
+        if (game.frame_count % update_interval == 0) {
+            int16_t target_x = is_right_side ? PADDLE_X_P2 : PADDLE_X_P1 + PADDLE_WIDTH;
+            paddle->target_y = AI_PredictBallY(target_x);
+
+            if (error_margin > 0) {
+                paddle->target_y += (rand() % (error_margin * 2)) - error_margin;
+            }
+        }
+        target_y = paddle->target_y;
+    } else {
+        target_y = FIELD_HEIGHT / 2;
+        speed = 1;
+    }
+
+    int16_t ball_dist = is_right_side ? (PADDLE_X_P2 - ball.x) : (ball.x - PADDLE_X_P1);
+
+    if (ball_dist < reaction_zone || !ball_coming) {
+        bool make_mistake = (mistake_chance > 0) && ((rand() % 100) < mistake_chance);
+
+        if (make_mistake) {
+            int mistake_type = rand() % 3;
+            if (mistake_type == 0) paddle->y -= speed;
+            else if (mistake_type == 1) paddle->y += speed;
+        } else {
+            if (paddle_center < target_y - 5) paddle->y += speed;
+            else if (paddle_center > target_y + 5) paddle->y -= speed;
+        }
+    }
+
+    if (paddle->y < PADDLE_MIN_Y) paddle->y = PADDLE_MIN_Y;
+    if (paddle->y > PADDLE_MAX_Y) paddle->y = PADDLE_MAX_Y;
+}
+
+/*============================================================================
+ * FUNCTII JOC PONG
+ *============================================================================*/
+
+void Game_Init(void) {
+    ball.x = BALL_START_X;
+    ball.y = BALL_START_Y;
+    ball.dx = BALL_SPEED_X;
+    ball.dy = BALL_SPEED_Y;
+    ball.prev_x = ball.x;
+    ball.prev_y = ball.y;
+    ball.size = BALL_SIZE;
+
+    if (rand() % 2) ball.dx = -ball.dx;
+    if (rand() % 2) ball.dy = -ball.dy;
+
+    paddle1.y = PADDLE_START_Y;
+    paddle1.prev_y = paddle1.y;
+    paddle1.score = 0;
+    paddle1.input = g_player1_input;
+    paddle1.target_y = FIELD_HEIGHT / 2;
+
+    paddle2.y = PADDLE_START_Y;
+    paddle2.prev_y = paddle2.y;
+    paddle2.score = 0;
+    paddle2.input = g_player2_input;
+    paddle2.target_y = FIELD_HEIGHT / 2;
+
+    game.is_running = 1;
+    game.is_paused = 0;
+    game.winner = 0;
+    game.winning_score = SCORE_TO_WIN;
+    game.frame_count = 0;
+    game.rally_frames = 0;
+    game.speed_level = 0;
+
+    g_p1_move = 0;
+    g_p2_move = 0;
+
+    IR_ResetGameState();
+
+    // ADAUGĂ ACEASTA SECȚIUNE:
+    // Inițializează giroscopul la poziția de start
+    if (g_player1_input == INPUT_GYROSCOPE || g_player2_input == INPUT_GYROSCOPE) {
+        g_gyro_paddle_y = PADDLE_START_Y;
+        g_gyro_angle = 0.0f;
+        g_last_gyro_update = Timer_GetMs();
+    }
+
+    memset(&g_ui_timers, 0, sizeof(g_ui_timers));
+    g_ui_timers.last_fps_print = Timer_GetMs();
+
+    g_game_over_effects_played = 0;
+
+}
+void Game_DrawField(void) {
+    uint32_t start = Timer_GetMs();
+
+    ST7735_FillScreen(COLOR_BLACK);
+
+    for (int16_t y = 4; y < FIELD_HEIGHT - 4; y += 8) {
+        ST7735_FillRect(79, y, 2, 4, COLOR_DARK_GRAY);
+    }
+
+    ST7735_DrawHLine(0, 0, FIELD_WIDTH, COLOR_WHITE);
+    ST7735_DrawHLine(0, FIELD_HEIGHT - 1, FIELD_WIDTH, COLOR_WHITE);
+
+    g_ui_timers.last_field_draw_time = Timer_GetMs() - start;
+}
+
+void Game_DrawScore(void) {
+    uint32_t start = Timer_GetMs();
+    char buf[8];
+
+    ST7735_FillRect(55, SCORE_Y, 50, 10, COLOR_BLACK);
+
+    snprintf(buf, sizeof(buf), "%d", paddle1.score);
+    ST7735_DrawStringScaled(68, SCORE_Y, buf, COLOR_CYAN, COLOR_BLACK, 1);
+
+    ST7735_DrawString(77, SCORE_Y, "-", COLOR_WHITE, COLOR_BLACK);
+
+    snprintf(buf, sizeof(buf), "%d", paddle2.score);
+    ST7735_DrawStringScaled(86, SCORE_Y, buf, COLOR_MAGENTA, COLOR_BLACK, 1);
+
+    g_ui_timers.last_score_draw_time = Timer_GetMs() - start;
+}
+
+void Game_DrawPaddle(Paddle_t* paddle, int16_t x, uint16_t color) {
+    uint32_t start = Timer_GetMs();
+
+    if (paddle->y != paddle->prev_y) {
+        int16_t diff = abs(paddle->y - paddle->prev_y);
+
+        // Dacă diferența e prea mare (salt brusc de la giroscop), șterge tot
+        if (diff > PADDLE_HEIGHT) {
+            ST7735_FillRect(x, paddle->prev_y, PADDLE_WIDTH, PADDLE_HEIGHT, COLOR_BLACK);
+        } else {
+            // Mișcare normală - șterge doar diferența
+            if (paddle->y > paddle->prev_y) {
+                int16_t clear_h = paddle->y - paddle->prev_y;
+                if (clear_h > PADDLE_HEIGHT) clear_h = PADDLE_HEIGHT;
+                ST7735_FillRect(x, paddle->prev_y, PADDLE_WIDTH, clear_h, COLOR_BLACK);
+            } else {
+                int16_t clear_h = paddle->prev_y - paddle->y;
+                if (clear_h > PADDLE_HEIGHT) clear_h = PADDLE_HEIGHT;
+                ST7735_FillRect(x, paddle->y + PADDLE_HEIGHT, PADDLE_WIDTH, clear_h, COLOR_BLACK);
+            }
+        }
+    }
+
+    ST7735_FillRect(x, paddle->y, PADDLE_WIDTH, PADDLE_HEIGHT, color);
+
+    paddle->prev_y = paddle->y;
+
+    g_ui_timers.last_paddle_draw_time = Timer_GetMs() - start;
+    g_ui_timers.paddle_draw_count++;
+}
+
+void Game_RedrawCenterLine(void) {
+    for (int16_t y = 4; y < FIELD_HEIGHT - 4; y += 8) {
+        ST7735_FillRect(79, y, 2, 4, COLOR_DARK_GRAY);
+    }
+}
+
+void Game_DrawBall(void) {
+    uint32_t start = Timer_GetMs();
+
+    if (ball.x != ball.prev_x || ball.y != ball.prev_y) {
+        ST7735_FillRect(ball.prev_x, ball.prev_y, ball.size, ball.size, COLOR_BLACK);
+    }
+
+    ST7735_FillRect(ball.x, ball.y, ball.size, ball.size, COLOR_YELLOW);
+
+    if ((ball.x >= 70 && ball.x <= 90) || (ball.prev_x >= 70 && ball.prev_x <= 90)) {
+        Game_RedrawCenterLine();
+    }
+
+    if (ball.y < 15 || ball.prev_y < 15) {
+        Game_DrawScore();
+    }
+
+    ball.prev_x = ball.x;
+    ball.prev_y = ball.y;
+
+    g_ui_timers.last_ball_draw_time = Timer_GetMs() - start;
+    g_ui_timers.ball_draw_count++;
+}
+
+void Game_ResetBall(void) {
+    ST7735_FillRect(ball.prev_x, ball.prev_y, ball.size, ball.size, COLOR_BLACK);
+
+    ball.x = BALL_START_X;
+    ball.y = BALL_START_Y;
+    ball.prev_x = ball.x;
+    ball.prev_y = ball.y;
+
+    int8_t dir = (ball.dx > 0) ? -1 : 1;
+    ball.dx = dir * BALL_SPEED_X;
+    ball.dy = (rand() % 2) ? BALL_SPEED_Y : -BALL_SPEED_Y;
+
+    game.rally_frames = 0;
+    game.speed_level = 0;
+
+    delay_ms(500);
+}
+
+void Game_Update(void) {
+    uint32_t start = Timer_GetMs();
+
+    if (!game.is_running || game.is_paused) return;
+
+    game.frame_count++;
+    game.rally_frames++;
+    g_ui_timers.frame_count++;
+
+    /* Accelerare minge */
+    if (game.rally_frames > 0 &&
+        game.rally_frames % SPEED_UP_INTERVAL == 0 &&
+        game.speed_level < MAX_SPEED_LEVEL) {
+
+        game.speed_level++;
+
+        if (ball.dx > 0) ball.dx++;
+        else ball.dx--;
+
+        if (game.speed_level % 2 == 0) {
+            if (ball.dy > 0) ball.dy++;
+            else if (ball.dy < 0) ball.dy--;
+        }
+
+        ST7735_FillRect(45, 55, 70, 18, COLOR_ORANGE);
+        ST7735_DrawRect(45, 55, 70, 18, COLOR_WHITE);
+        ST7735_DrawStringCentered(59, "SPEED UP!", COLOR_WHITE, COLOR_ORANGE, 1);
+        delay_ms(300);
+        ST7735_FillRect(45, 55, 70, 18, COLOR_BLACK);
+        Game_RedrawCenterLine();
+
+        PRINTF("[GAME] Speed level: %d\r\n", game.speed_level);
+    }
+
+    /* Paleta 1 (stanga) */
+        if (IsCPUInput(paddle1.input)) {
+            AI_UpdatePaddle(&paddle1, false);
+        } else if (paddle1.input == INPUT_JOYSTICK) {
+            int16_t joy_y = Joystick_GetY_Percent();
+            if (joy_y > 15) paddle1.y += (joy_y / 10);
+            else if (joy_y < -15) paddle1.y += (joy_y / 10);
+        } else if (paddle1.input == INPUT_REMOTE) {
+            int8_t ir_dir = IR_GetCurrentDirection();
+            paddle1.y += ir_dir * PADDLE_SPEED;
+        } else if (paddle1.input == INPUT_GYROSCOPE) {  // ADAUGĂ
+            paddle1.y = Gyro_GetPaddleY();
+        }
+
+        /* Paleta 2 (dreapta) */
+        if (IsCPUInput(paddle2.input)) {
+            AI_UpdatePaddle(&paddle2, true);
+        } else if (paddle2.input == INPUT_JOYSTICK) {
+            int16_t joy_y = Joystick_GetY_Percent();
+            if (joy_y > 15) paddle2.y += (joy_y / 10);
+            else if (joy_y < -15) paddle2.y += (joy_y / 10);
+        } else if (paddle2.input == INPUT_REMOTE) {
+            int8_t ir_dir = IR_GetCurrentDirection();
+            paddle2.y += ir_dir * PADDLE_SPEED;
+        } else if (paddle2.input == INPUT_GYROSCOPE) {
+            int16_t target = Gyro_GetPaddleY();
+
+            // opțional: ignoră dacă nu avem date recente (de exemplu senzor mort)
+            if (!Gyro_IsActive()) {
+                // nu schimba paleta daca giroscopul nu a mai trimis nimic
+                // (sau eventual du-o încet spre centru)
+                // return;   // cel mai simplu: lasa paleta unde e
+            }
+
+            int16_t dy = target - paddle2.y;
+
+            // dacă diferența e mică, nu mai mișcăm (evită tremuratul fin)
+            if (dy > -2 && dy < 2) {
+                // nu face nimic, păstrăm poziția curentă
+            } else {
+                // limitați viteza paletei (de ex. max 3 pixeli pe frame)
+                int16_t step = 3;
+                if (dy > 0) {
+                    if (dy < step) step = dy;
+                    paddle2.y += step;
+                } else {
+                    if (-dy < step) step = -dy;
+                    paddle2.y -= step;
+                }
+            }
+        }
+
+
+    /* Limiteaza pozitiile */
+    if (paddle1.y < PADDLE_MIN_Y) paddle1.y = PADDLE_MIN_Y;
+    if (paddle1.y > PADDLE_MAX_Y) paddle1.y = PADDLE_MAX_Y;
+    if (paddle2.y < PADDLE_MIN_Y) paddle2.y = PADDLE_MIN_Y;
+    if (paddle2.y > PADDLE_MAX_Y) paddle2.y = PADDLE_MAX_Y;
+
+    /* Miscare bila */
+    ball.x += ball.dx;
+    ball.y += ball.dy;
+
+    /* Coliziune sus/jos */
+    if (ball.y <= 2) {
+        ball.y = 3;
+        ball.dy = -ball.dy;
+    }
+    if (ball.y >= FIELD_HEIGHT - BALL_SIZE - 2) {
+        ball.y = FIELD_HEIGHT - BALL_SIZE - 3;
+        ball.dy = -ball.dy;
+    }
+
+    /* Coliziune Paleta 1 */
+    if (ball.dx < 0 && ball.x <= PADDLE_X_P1 + PADDLE_WIDTH + 1 && ball.x >= PADDLE_X_P1) {
+        if (ball.y + ball.size >= paddle1.y && ball.y <= paddle1.y + PADDLE_HEIGHT) {
+            ball.x = PADDLE_X_P1 + PADDLE_WIDTH + 2;
+            ball.dx = -ball.dx;
+            int16_t hit_pos = (ball.y + ball.size / 2) - (paddle1.y + PADDLE_HEIGHT / 2);
+            ball.dy = hit_pos / 4;
+            if (ball.dy == 0) ball.dy = (rand() % 2) ? 1 : -1;
+        }
+    }
+
+    /* Coliziune Paleta 2 */
+    if (ball.dx > 0 && ball.x + ball.size >= PADDLE_X_P2 - 1 && ball.x <= PADDLE_X_P2 + PADDLE_WIDTH) {
+        if (ball.y + ball.size >= paddle2.y && ball.y <= paddle2.y + PADDLE_HEIGHT) {
+            ball.x = PADDLE_X_P2 - ball.size - 2;
+            ball.dx = -ball.dx;
+            int16_t hit_pos = (ball.y + ball.size / 2) - (paddle2.y + PADDLE_HEIGHT / 2);
+            ball.dy = hit_pos / 4;
+            if (ball.dy == 0) ball.dy = (rand() % 2) ? 1 : -1;
+        }
+    }
+
+    /* Gol stanga - Player 2 marcheaza */
+    if (ball.x < -ball.size) {
+        paddle2.score++;
+        LED_GoalFlash(2, paddle2.score);  // Flash-uri = scorul P2
+        Buzzer_GoalSound();  // Sunet gol
+        Game_DrawScore();
+        if (paddle2.score >= game.winning_score) {
+            game.winner = 2;
+            game.is_running = 0;
+        } else {
+            Game_ResetBall();
+        }
+    }
+
+    /* Gol dreapta - Player 1 marcheaza */
+    if (ball.x > FIELD_WIDTH + ball.size) {
+        paddle1.score++;
+        LED_GoalFlash(1, paddle1.score);  // Flash-uri = scorul P1
+        Buzzer_GoalSound();  // Sunet gol
+        Game_DrawScore();
+        if (paddle1.score >= game.winning_score) {
+            game.winner = 1;
+            game.is_running = 0;
+        } else {
+            Game_ResetBall();
+        }
+    }
+
+    /* Desenare */
+    Game_DrawPaddle(&paddle1, PADDLE_X_P1, COLOR_CYAN);
+    Game_DrawPaddle(&paddle2, PADDLE_X_P2, COLOR_MAGENTA);
+    Game_DrawBall();
+
+    g_ui_timers.last_game_update_time = Timer_GetMs() - start;
+}
+
+void Game_Start(void) {
+    PRINTF("\r\n=== GAME STARTED ===\r\n");
+    PRINTF("P1: %s | P2: %s\r\n", GetInputName(g_player1_input), GetInputName(g_player2_input));
+
+    Game_Init();
+    Game_DrawField();
+    Game_DrawScore();
+
+    ST7735_FillRect(PADDLE_X_P1, paddle1.y, PADDLE_WIDTH, PADDLE_HEIGHT, COLOR_CYAN);
+    ST7735_FillRect(PADDLE_X_P2, paddle2.y, PADDLE_WIDTH, PADDLE_HEIGHT, COLOR_MAGENTA);
+
+    /* === COUNTDOWN CU LED-URI ARCADE === */
+
+    // READY - ambele LED-uri ON
+    ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
+    ST7735_DrawRect(40, 50, 80, 30, COLOR_YELLOW);
+    ST7735_DrawStringCentered(58, "READY", COLOR_YELLOW, COLOR_DARK_GRAY, 2);
+    LEDS_BOTH_ON();
+    delay_ms(700);
+
+    // 3 - LED P1 flash
+    ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
+    ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
+    ST7735_DrawStringCentered(58, "3", COLOR_WHITE, COLOR_DARK_GRAY, 2);
+    LEDS_BOTH_OFF();
+    LED_P1_ON();
+    delay_ms(400);
+
+    // 2 - LED P2 flash
+    ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
+    ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
+    ST7735_DrawStringCentered(58, "2", COLOR_WHITE, COLOR_DARK_GRAY, 2);
+    LED_P1_OFF();
+    LED_P2_ON();
+    delay_ms(400);
+
+    // 1 - LED P1 flash
+    ST7735_FillRect(40, 50, 80, 30, COLOR_DARK_GRAY);
+    ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
+    ST7735_DrawStringCentered(58, "1", COLOR_WHITE, COLOR_DARK_GRAY, 2);
+    LED_P2_OFF();
+    LED_P1_ON();
+    delay_ms(400);
+
+    // GO! - ambele flash rapid + sunet start
+    ST7735_FillRect(40, 50, 80, 30, COLOR_GREEN);
+    ST7735_DrawRect(40, 50, 80, 30, COLOR_WHITE);
+    ST7735_DrawStringCentered(58, "GO!", COLOR_WHITE, COLOR_GREEN, 2);
+    LED_P1_OFF();
+    LEDS_BOTH_ON();
+    Buzzer_StartSound();  // Sunet start joc
+    LEDS_BOTH_OFF();
+    delay_ms(200);
+
+    ST7735_FillRect(40, 50, 80, 30, COLOR_BLACK);
+    Game_RedrawCenterLine();
+
+    g_currentScreen = SCREEN_GAMEPLAY;
+}
+
+/*============================================================================
+ * FUNCTII DE DESENARE MENIU
+ *============================================================================*/
+
+void DrawTitle(const char* title) {
+    ST7735_FillRect(0, 0, ST7735_WIDTH, 30, COLOR_BG);
+    ST7735_DrawStringCentered(TITLE_Y, title, COLOR_TITLE, COLOR_BG, 2);
+    ST7735_DrawHLine(0, 32, ST7735_WIDTH, COLOR_TITLE);
+}
+
+void DrawMenuItem(uint8_t index, const char* text, bool selected, bool enabled) {
+    int16_t y = MENU_START_Y + index * MENU_ITEM_HEIGHT;
+    uint16_t bgColor = selected ? COLOR_DARK_GRAY : COLOR_BG;
+    uint16_t textColor;
+
+    if (!enabled) textColor = COLOR_DISABLED;
+    else if (selected) textColor = COLOR_SELECTED;
+    else textColor = COLOR_NORMAL;
+
+    ST7735_FillRect(0, y, ST7735_WIDTH, MENU_ITEM_HEIGHT, bgColor);
+
+    if (selected) ST7735_DrawString(MENU_MARGIN_X, y + 3, ">", COLOR_SELECTED, bgColor);
+    ST7735_DrawString(MENU_MARGIN_X + 12, y + 3, text, textColor, bgColor);
+}
+
+void DrawInputMenuItem(uint8_t index, InputType_t input, bool selected, uint8_t forPlayer) {
+    int16_t y = MENU_START_Y + index * MENU_ITEM_HEIGHT;
+    bool available = IsInputAvailable(input, forPlayer);
+    bool isCurrentSelection;
+
+    if (forPlayer == 1) isCurrentSelection = (g_player1_input == input);
+    else isCurrentSelection = (g_player2_input == input);
+
+    uint16_t bgColor = selected ? COLOR_DARK_GRAY : COLOR_BG;
+    uint16_t textColor;
+
+    if (!available) textColor = COLOR_DISABLED;
+    else if (isCurrentSelection) textColor = COLOR_HIGHLIGHT;
+    else if (selected) textColor = COLOR_SELECTED;
+    else textColor = COLOR_NORMAL;
+
+    ST7735_FillRect(0, y, ST7735_WIDTH, MENU_ITEM_HEIGHT, bgColor);
+
+    if (selected) ST7735_DrawString(MENU_MARGIN_X, y + 3, ">", COLOR_SELECTED, bgColor);
+    ST7735_DrawString(MENU_MARGIN_X + 12, y + 3, GetInputName(input), textColor, bgColor);
+
+    if (isCurrentSelection) {
+        ST7735_DrawString(115, y + 3, "<-", COLOR_HIGHLIGHT, bgColor);
+    } else if (!available) {
+        if (forPlayer == 1) ST7735_DrawString(108, y + 3, "[P2]", COLOR_RED, bgColor);
+        else ST7735_DrawString(108, y + 3, "[P1]", COLOR_CYAN, bgColor);
+    }
+}
+
+void DrawBackOption(uint8_t index, bool selected) {
+    int16_t y = MENU_START_Y + index * MENU_ITEM_HEIGHT;
+    uint16_t bgColor = selected ? COLOR_DARK_GRAY : COLOR_BG;
+
+    ST7735_FillRect(0, y, ST7735_WIDTH, MENU_ITEM_HEIGHT, bgColor);
+    if (selected) ST7735_DrawString(MENU_MARGIN_X, y + 3, ">", COLOR_SELECTED, bgColor);
+    ST7735_DrawString(MENU_MARGIN_X + 12, y + 3, "<< Back", COLOR_BACK, bgColor);
+}
+
+/*============================================================================
+ * FUNCTII PENTRU FIECARE ECRAN
+ *============================================================================*/
+
+void DrawMainScreen(void) {
+    uint32_t start = Timer_GetMs();
+
+    // Opreste LED-urile cand suntem in meniul principal
+    LEDS_BOTH_OFF();
+
+    ST7735_FillScreen(COLOR_BG);
+    DrawTitle("PONG GAME");
+
+    DrawMenuItem(0, "Start", g_menuState.selectedIndex == 0, true);
+    DrawMenuItem(1, "Select Input", g_menuState.selectedIndex == 1, true);
+
+    ST7735_DrawHLine(0, 100, ST7735_WIDTH, COLOR_GRAY);
+
+    char buf[32];
+    snprintf(buf, sizeof(buf), "P1:%s", GetInputName(g_player1_input));
+    ST7735_DrawString(5, 108, buf, COLOR_CYAN, COLOR_BG);
+
+    snprintf(buf, sizeof(buf), "P2:%s", GetInputName(g_player2_input));
+    ST7735_DrawString(85, 108, buf, COLOR_MAGENTA, COLOR_BG);
+
+    g_ui_timers.last_menu_draw_time = Timer_GetMs() - start;
+}
+
+void DrawStartScreen(void) {
+    ST7735_FillScreen(COLOR_BG);
+    DrawTitle("START");
+
+    DrawMenuItem(0, "Player vs Player", g_menuState.selectedIndex == 0, true);
+    DrawMenuItem(1, "Player vs CPU", g_menuState.selectedIndex == 1, true);
+    DrawBackOption(2, g_menuState.selectedIndex == 2);
+}
+
+void DrawSelectInputScreen(void) {
+    // Opreste LED-urile cand ne intoarcem la select input
+    LEDS_BOTH_OFF();
+
+    ST7735_FillScreen(COLOR_BG);
+    DrawTitle("SELECT INPUT");
+
+    DrawMenuItem(0, "Player 1", g_menuState.selectedIndex == 0, true);
+    DrawMenuItem(1, "Player 2", g_menuState.selectedIndex == 1, true);
+    DrawBackOption(2, g_menuState.selectedIndex == 2);
+
+    ST7735_DrawHLine(0, 95, ST7735_WIDTH, COLOR_GRAY);
+    ST7735_DrawString(5, 100, "Current Setup:", COLOR_GRAY, COLOR_BG);
+
+    char buf[24];
+    snprintf(buf, sizeof(buf), "P1: %s", GetInputName(g_player1_input));
+    ST7735_DrawString(5, 112, buf, COLOR_CYAN, COLOR_BG);
+
+    snprintf(buf, sizeof(buf), "P2: %s", GetInputName(g_player2_input));
+    ST7735_DrawString(85, 112, buf, COLOR_MAGENTA, COLOR_BG);
+}
+
+void DrawSelectP1Screen(void) {
+    // LED P2 ON cand selectam pentru Player 1 (inversat)
+    LED_P1_OFF();
+    LED_P2_ON();
+
+    ST7735_FillScreen(COLOR_BG);
+    DrawTitle("PLAYER 1");
+
+    DrawInputMenuItem(0, INPUT_JOYSTICK, g_menuState.selectedIndex == 0, 1);
+    DrawInputMenuItem(1, INPUT_REMOTE, g_menuState.selectedIndex == 1, 1);
+    DrawInputMenuItem(2, INPUT_GYROSCOPE, g_menuState.selectedIndex == 2, 1);
+    DrawBackOption(3, g_menuState.selectedIndex == 3);
+}
+
+void DrawSelectP2Screen(void) {
+    // LED P1 ON cand selectam pentru Player 2 (inversat)
+    LED_P2_OFF();
+    LED_P1_ON();
+
+    ST7735_FillScreen(COLOR_BG);
+    DrawTitle("PLAYER 2");
+
+    DrawInputMenuItem(0, INPUT_JOYSTICK, g_menuState.selectedIndex == 0, 2);
+    DrawInputMenuItem(1, INPUT_REMOTE, g_menuState.selectedIndex == 1, 2);
+    DrawInputMenuItem(2, INPUT_GYROSCOPE, g_menuState.selectedIndex == 2, 2);
+    DrawBackOption(3, g_menuState.selectedIndex == 3);
+}
+
+void DrawDifficultyScreen(void) {
+    ST7735_FillScreen(COLOR_BG);
+    DrawTitle("DIFFICULTY");
+
+    DrawMenuItem(0, "Easy", g_menuState.selectedIndex == 0, true);
+    if (g_menuState.selectedIndex == 0) {
+        ST7735_DrawString(90, MENU_START_Y + 3, "(Slow)", COLOR_GRAY, COLOR_DARK_GRAY);
+    }
+
+    DrawMenuItem(1, "Medium", g_menuState.selectedIndex == 1, true);
+    if (g_menuState.selectedIndex == 1) {
+        ST7735_DrawString(90, MENU_START_Y + MENU_ITEM_HEIGHT + 3, "(Normal)", COLOR_GRAY, COLOR_DARK_GRAY);
+    }
+
+    DrawMenuItem(2, "Hard", g_menuState.selectedIndex == 2, true);
+    if (g_menuState.selectedIndex == 2) {
+        ST7735_DrawString(90, MENU_START_Y + 2*MENU_ITEM_HEIGHT + 3, "(Fast)", COLOR_GRAY, COLOR_DARK_GRAY);
+    }
+
+    DrawBackOption(3, g_menuState.selectedIndex == 3);
+
+    ST7735_DrawHLine(0, 100, ST7735_WIDTH, COLOR_GRAY);
+    ST7735_DrawString(10, 108, "P1: Joystick", COLOR_CYAN, COLOR_BG);
+    ST7735_DrawString(90, 108, "P2: CPU", COLOR_MAGENTA, COLOR_BG);
+}
+
+
+
+void DrawGameOverScreen(void) {
+	if(!g_game_over_effects_played)
+	{
+		// === LED CELEBRATION + SUNET la Game Over ===
+		    Buzzer_GameOverSound();         // Sunet game over
+		    LED_AlternatingFlash(5, 120);   // Flash alternativ rapid
+		    LED_VictoryPulse(game.winner);  // Pulsuri pentru castigator
+
+		    ST7735_FillScreen(COLOR_BG);
+
+		    ST7735_DrawStringCentered(15, "GAME OVER", COLOR_RED, COLOR_BG, 2);
+		    g_game_over_effects_played=1;
+	}
+
+
+    char buf[32];
+    uint16_t winner_color = (game.winner == 1) ? COLOR_CYAN : COLOR_MAGENTA;
+    snprintf(buf, sizeof(buf), "Player %d Wins!", game.winner);
+    ST7735_DrawStringCentered(45, buf, winner_color, COLOR_BG, 1);
+
+    snprintf(buf, sizeof(buf), "%d - %d", paddle1.score, paddle2.score);
+    ST7735_DrawStringCentered(60, buf, COLOR_WHITE, COLOR_BG, 2);
+
+    ST7735_DrawHLine(0, 82, ST7735_WIDTH, COLOR_GRAY);
+
+    uint16_t bg0 = (g_menuState.selectedIndex == 0) ? COLOR_DARK_GRAY : COLOR_BG;
+    uint16_t col0 = (g_menuState.selectedIndex == 0) ? COLOR_SELECTED : COLOR_NORMAL;
+    ST7735_FillRect(0, 88, ST7735_WIDTH, 16, bg0);
+    if (g_menuState.selectedIndex == 0) ST7735_DrawString(MENU_MARGIN_X, 92, ">", COLOR_SELECTED, bg0);
+    ST7735_DrawString(MENU_MARGIN_X + 12, 92, "Play Again", col0, bg0);
+
+    uint16_t bg1 = (g_menuState.selectedIndex == 1) ? COLOR_DARK_GRAY : COLOR_BG;
+    uint16_t col1 = (g_menuState.selectedIndex == 1) ? COLOR_SELECTED : COLOR_NORMAL;
+    ST7735_FillRect(0, 106, ST7735_WIDTH, 16, bg1);
+    if (g_menuState.selectedIndex == 1) ST7735_DrawString(MENU_MARGIN_X, 110, ">", COLOR_SELECTED, bg1);
+    ST7735_DrawString(MENU_MARGIN_X + 12, 110, "Main Menu", col1, bg1);
+}
+
+static uint8_t g_pause_selection = 0;
+
+void DrawPausedScreen(void) {
+    ST7735_FillRect(25, 35, 110, 60, COLOR_DARK_GRAY);
+    ST7735_DrawRect(25, 35, 110, 60, COLOR_WHITE);
+    ST7735_DrawRect(27, 37, 106, 56, COLOR_GRAY);
+
+    ST7735_DrawStringCentered(42, "PAUSED", COLOR_YELLOW, COLOR_DARK_GRAY, 2);
+
+    if (g_pause_selection == 0) {
+        ST7735_FillRect(40, 62, 80, 12, COLOR_CYAN);
+        ST7735_DrawString(45, 64, "> Resume", COLOR_BLACK, COLOR_CYAN);
+    } else {
+        ST7735_FillRect(40, 62, 80, 12, COLOR_DARK_GRAY);
+        ST7735_DrawString(50, 64, "Resume", COLOR_WHITE, COLOR_DARK_GRAY);
+    }
+
+    if (g_pause_selection == 1) {
+        ST7735_FillRect(40, 76, 80, 12, COLOR_RED);
+        ST7735_DrawString(45, 78, "> Exit", COLOR_WHITE, COLOR_RED);
+    } else {
+        ST7735_FillRect(40, 76, 80, 12, COLOR_DARK_GRAY);
+        ST7735_DrawString(50, 78, "Exit", COLOR_GRAY, COLOR_DARK_GRAY);
+    }
+}
+
+/*============================================================================
+ * ECRAN INTRO ANIMAT
+ *============================================================================*/
+
+static const uint16_t rainbow_colors[] = {
+    COLOR_RED, COLOR_ORANGE, COLOR_YELLOW, COLOR_GREEN, COLOR_CYAN, COLOR_BLUE, COLOR_MAGENTA
+};
+#define NUM_RAINBOW_COLORS 7
+
+#define BMO_SCREEN_COLOR  0x0400
+#define BMO_FACE_COLOR    COLOR_BLACK
+
+void DrawBMOFace(uint8_t expression, uint8_t blink) {
+    ST7735_FillScreen(BMO_SCREEN_COLOR);
+
+    if (blink) {
+        ST7735_FillRect(30, 40, 35, 5, BMO_FACE_COLOR);
+        ST7735_FillRect(95, 40, 35, 5, BMO_FACE_COLOR);
+    } else {
+        ST7735_FillRect(35, 25, 25, 25, BMO_FACE_COLOR);
+        ST7735_FillRect(100, 25, 25, 25, BMO_FACE_COLOR);
+        ST7735_FillRect(42, 30, 10, 10, COLOR_WHITE);
+        ST7735_FillRect(107, 30, 10, 10, COLOR_WHITE);
+    }
+
+    switch (expression) {
+        case 0:
+            ST7735_FillRect(55, 70, 50, 5, BMO_FACE_COLOR);
+            break;
+        case 1:
+            ST7735_FillRect(50, 75, 60, 5, BMO_FACE_COLOR);
+            ST7735_FillRect(42, 70, 12, 5, BMO_FACE_COLOR);
+            ST7735_FillRect(106, 70, 12, 5, BMO_FACE_COLOR);
+            ST7735_FillRect(36, 64, 10, 6, BMO_FACE_COLOR);
+            ST7735_FillRect(114, 64, 10, 6, BMO_FACE_COLOR);
+            break;
+        case 2:
+            ST7735_FillRect(50, 65, 60, 25, BMO_FACE_COLOR);
+            ST7735_FillRect(56, 72, 48, 14, BMO_SCREEN_COLOR);
+            ST7735_FillRect(65, 78, 30, 6, COLOR_RED);
+            break;
+        case 3:
+            ST7735_FillRect(35, 25, 25, 25, BMO_FACE_COLOR);
+            ST7735_FillRect(42, 30, 10, 10, COLOR_WHITE);
+            ST7735_FillRect(95, 40, 35, 5, BMO_FACE_COLOR);
+            ST7735_FillRect(50, 75, 60, 5, BMO_FACE_COLOR);
+            ST7735_FillRect(42, 70, 12, 5, BMO_FACE_COLOR);
+            ST7735_FillRect(106, 70, 12, 5, BMO_FACE_COLOR);
+            break;
+    }
+}
+
+void PlayIntroAnimation(void) {
+    int16_t ball_x = 80, ball_y = 82;
+    int16_t ball_dx = 2, ball_dy = 1;
+    int16_t p1_y = 72, p2_y = 72;
+    const uint8_t BALL_SZ = 5;
+    const uint8_t PAD_W = 4, PAD_H = 18;
+    const int16_t DEMO_TOP = 66;
+    const int16_t DEMO_BOTTOM = 102;
+    uint32_t anim_start;
+
+    /* === LED-uri la start intro === */
+    LED_BothFlash(2, 100, 100);
+
+    /* === Porneste melodia "The Metro" === */
+    PRINTF("Playing intro melody...\r\n");
+
+    /* Faza BMO */
+    ST7735_FillScreen(BMO_SCREEN_COLOR);
+    delay_ms(300);
+
+    DrawBMOFace(0, 0);
+    LED_BothFlash(1, 80, 0);  // Flash la aparitia BMO
+    delay_ms(420);
+
+    DrawBMOFace(0, 1);
+    delay_ms(150);
+    DrawBMOFace(0, 0);
+    delay_ms(300);
+
+    ST7735_DrawStringCentered(100, "Hi!", COLOR_BLACK, BMO_SCREEN_COLOR, 2);
+    delay_ms(600);
+
+    DrawBMOFace(1, 0);
+    delay_ms(400);
+
+    ST7735_FillRect(40, 95, 80, 25, BMO_SCREEN_COLOR);
+    ST7735_DrawStringCentered(100, "Let's play", COLOR_BLACK, BMO_SCREEN_COLOR, 1);
+    delay_ms(500);
+
+    DrawBMOFace(2, 0);
+    ST7735_DrawStringCentered(112, "PONG!", COLOR_YELLOW, BMO_SCREEN_COLOR, 2);
+    delay_ms(800);
+
+    DrawBMOFace(2, 1);
+    delay_ms(150);
+    DrawBMOFace(2, 0);
+    delay_ms(200);
+
+    DrawBMOFace(3, 0);
+    delay_ms(400);
+
+    DrawBMOFace(1, 0);
+    ST7735_DrawStringCentered(100, "Let's play", COLOR_BLACK, BMO_SCREEN_COLOR, 1);
+    ST7735_DrawStringCentered(112, "PONG!", COLOR_YELLOW, BMO_SCREEN_COLOR, 2);
+    delay_ms(1000);
+
+    for (int i = 0; i < 3; i++) {
+        ST7735_FillScreen(COLOR_WHITE);
+        LEDS_BOTH_ON();  // LED flash sincronizat cu ecranul
+        delay_ms(50);
+        ST7735_FillScreen(BMO_SCREEN_COLOR);
+        LEDS_BOTH_OFF();
+        DrawBMOFace(1, 0);
+        ST7735_DrawStringCentered(100, "Let's play", COLOR_BLACK, BMO_SCREEN_COLOR, 1);
+        ST7735_DrawStringCentered(112, "PONG!", COLOR_YELLOW, BMO_SCREEN_COLOR, 2);
+        delay_ms(100);
+    }
+
+    delay_ms(200);
+
+    anim_start = Timer_GetMs();
+
+    /* Rainbow scanlines cu LED-uri pulsand */
+    for (int16_t y = 0; y < 128; y += 2) {
+        uint16_t scan_color = rainbow_colors[y % NUM_RAINBOW_COLORS];
+        ST7735_DrawHLine(0, y, 160, scan_color);
+        // LED-uri alternand in timpul scanlines
+        if (y % 16 == 0) LED_P1_TOGGLE();
+        if (y % 16 == 8) LED_P2_TOGGLE();
+        delay_ms(8);
+    }
+    LEDS_BOTH_OFF();
+    delay_ms(100);
+
+    /* Flash de culori cu LED-uri sincronizate */
+    ST7735_FillScreen(COLOR_CYAN);
+    LED_P1_ON();
+    delay_ms(40);
+    ST7735_FillScreen(COLOR_MAGENTA);
+    LED_P1_OFF(); LED_P2_ON();
+    delay_ms(40);
+    ST7735_FillScreen(COLOR_YELLOW);
+    LEDS_BOTH_ON();
+    delay_ms(40);
+    ST7735_FillScreen(COLOR_WHITE);
+    delay_ms(60);
+    LEDS_BOTH_OFF();
+
+    for (int16_t y = 0; y < 128; y++) {
+        uint8_t intensity = 10 + (y / 8);
+        uint16_t grad_color = ((intensity >> 3) << 11);
+        ST7735_DrawHLine(0, y, 160, grad_color);
+    }
+    delay_ms(100);
+
+    for (int i = 0; i < 4; i++) {
+        ST7735_DrawRect(78 - i*20, 62 - i*16, 4 + i*40, 4 + i*32, rainbow_colors[i % NUM_RAINBOW_COLORS]);
+        delay_ms(60);
+    }
+    delay_ms(100);
+
+    ST7735_FillRect(6, 6, 148, 116, COLOR_BLACK);
+    ST7735_DrawRect(4, 4, 152, 120, COLOR_WHITE);
+    ST7735_DrawRect(6, 6, 148, 116, COLOR_GRAY);
+
+    delay_ms(150);
+
+    const char* letters = "PONG";
+    int16_t letter_x[] = {26, 54, 82, 110};
+    uint16_t letter_colors[] = {COLOR_CYAN, COLOR_YELLOW, COLOR_MAGENTA, COLOR_GREEN};
+    const uint8_t TITLE_SIZE = 3;
+
+    for (uint8_t size = 1; size <= TITLE_SIZE; size++) {
+        for (int i = 0; i < 4; i++) {
+            int16_t offset = (TITLE_SIZE - size) * 4;
+            ST7735_DrawChar(letter_x[i] + offset, 15 + offset, letters[i],
+                           letter_colors[i], COLOR_BLACK, size);
+        }
+        delay_ms(80);
+        if (size < TITLE_SIZE) {
+            ST7735_FillRect(20, 10, 120, 40, COLOR_BLACK);
+        }
+    }
+
+    /* Flash titlu PONG cu LED-uri */
+    for (int flash = 0; flash < 3; flash++) {
+        for (int i = 0; i < 4; i++) {
+            ST7735_DrawChar(letter_x[i], 15, letters[i],
+                           rainbow_colors[(flash + i) % NUM_RAINBOW_COLORS], COLOR_BLACK, TITLE_SIZE);
+        }
+        LED_P1_TOGGLE(); LED_P2_TOGGLE();  // LED-uri alternand cu titlul
+        delay_ms(80);
+    }
+    LEDS_BOTH_OFF();
+
+    for (int i = 0; i < 4; i++) {
+        ST7735_DrawChar(letter_x[i], 15, letters[i], letter_colors[i], COLOR_BLACK, TITLE_SIZE);
+    }
+    LED_BothFlash(2, 50, 50);  // Flash final la titlu complet
+
+    for (int16_t w = 0; w <= 70; w += 3) {
+        ST7735_DrawHLine(80 - w, 42, w * 2, COLOR_WHITE);
+        if (w > 10) {
+            ST7735_DrawHLine(80 - w + 5, 43, (w - 5) * 2, COLOR_GRAY);
+        }
+        delay_ms(6);
+    }
+
+    delay_ms(100);
+
+    const char* subtitle = "ARCADE EDITION";
+    char typing_buf[20] = "";
+    for (int i = 0; subtitle[i] != '\0'; i++) {
+        typing_buf[i] = subtitle[i];
+        typing_buf[i+1] = '\0';
+        ST7735_FillRect(30, 48, 100, 12, COLOR_BLACK);
+        ST7735_DrawStringCentered(50, typing_buf, COLOR_ORANGE, COLOR_BLACK, 1);
+        delay_ms(40);
+    }
+
+    ST7735_DrawStringCentered(50, subtitle, COLOR_WHITE, COLOR_BLACK, 1);
+    delay_ms(80);
+    ST7735_DrawStringCentered(50, subtitle, COLOR_ORANGE, COLOR_BLACK, 1);
+
+    delay_ms(200);
+
+    ST7735_DrawHLine(15, 62, 130, COLOR_DARK_GRAY);
+    ST7735_DrawHLine(15, 105, 130, COLOR_DARK_GRAY);
+
+    ST7735_FillRect(8, p1_y, PAD_W, PAD_H, COLOR_CYAN);
+    ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_MAGENTA);
+
+    ST7735_DrawStringCentered(112, "Press to Start", COLOR_WHITE, COLOR_BLACK, 1);
+    ST7735_DrawStringCentered(120, ">> PUSH <<", COLOR_GRAY, COLOR_BLACK, 1);
+
+    PRINTF("Intro animation started\r\n");
+
+    g_joy_btn_pressed = false;
+    uint8_t border_color_idx = 0;
+    uint32_t last_border_update = 0;
+    uint8_t title_glow = 0;
+    uint32_t last_title_glow = 0;
+    uint8_t blink_state = 0;
+    uint32_t last_blink = 0;
+
+    while (!g_joy_btn_pressed && !IR_IsPausePressed()) {
+        uint32_t now = Timer_GetMs();
+
+
+        ST7735_FillRect(ball_x, ball_y, BALL_SZ, BALL_SZ, COLOR_BLACK);
+
+        ball_x += ball_dx;
+        ball_y += ball_dy;
+
+        if (ball_y <= DEMO_TOP || ball_y >= DEMO_BOTTOM - BALL_SZ) {
+            ball_dy = -ball_dy;
+        }
+        if (ball_x <= 12 && ball_y + BALL_SZ >= p1_y && ball_y <= p1_y + PAD_H) {
+            ball_dx = -ball_dx;
+            ball_x = 13;
+            ST7735_FillRect(8, p1_y, PAD_W, PAD_H, COLOR_WHITE);
+            LED_P1_ON();  // LED P1 flash la coliziune demo
+        }
+        if (ball_x >= 148 - BALL_SZ && ball_y + BALL_SZ >= p2_y && ball_y <= p2_y + PAD_H) {
+            ball_dx = -ball_dx;
+            ball_x = 147 - BALL_SZ;
+            ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_WHITE);
+            LED_P2_ON();  // LED P2 flash la coliziune demo
+        }
+
+        if (ball_x < 5 || ball_x > 155) {
+            ball_x = 80;
+            ball_y = 82;
+            ball_dx = (ball_dx > 0) ? -2 : 2;
+        }
+
+        ST7735_FillRect(8, p1_y, PAD_W, PAD_H, COLOR_BLACK);
+        if (ball_y > p1_y + PAD_H/2) p1_y += 2;
+        else if (ball_y < p1_y + PAD_H/2) p1_y -= 2;
+        if (p1_y < DEMO_TOP) p1_y = DEMO_TOP;
+        if (p1_y > DEMO_BOTTOM - PAD_H) p1_y = DEMO_BOTTOM - PAD_H;
+        ST7735_FillRect(8, p1_y, PAD_W, PAD_H, COLOR_CYAN);
+        LED_P1_OFF();  // Opreste LED dupa redraw paleta
+
+        ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_BLACK);
+        if (ball_y > p2_y + PAD_H/2) p2_y += 2;
+        else if (ball_y < p2_y + PAD_H/2) p2_y -= 2;
+        if (p2_y < DEMO_TOP) p2_y = DEMO_TOP;
+        if (p2_y > DEMO_BOTTOM - PAD_H) p2_y = DEMO_BOTTOM - PAD_H;
+        ST7735_FillRect(148, p2_y, PAD_W, PAD_H, COLOR_MAGENTA);
+        LED_P2_OFF();  // Opreste LED dupa redraw paleta
+
+        uint16_t ball_color = rainbow_colors[(now / 200) % NUM_RAINBOW_COLORS];
+        ST7735_FillRect(ball_x, ball_y, BALL_SZ, BALL_SZ, ball_color);
+
+        if ((now - last_border_update) >= 150) {
+            last_border_update = now;
+            border_color_idx = (border_color_idx + 1) % NUM_RAINBOW_COLORS;
+            ST7735_DrawRect(4, 4, 152, 120, rainbow_colors[border_color_idx]);
+        }
+
+        if ((now - last_title_glow) >= 200) {
+            last_title_glow = now;
+            title_glow = (title_glow + 1) % NUM_RAINBOW_COLORS;
+
+            for (int i = 0; i < 4; i++) {
+                uint8_t color_idx = (title_glow + i * 2) % NUM_RAINBOW_COLORS;
+                uint16_t letter_col;
+                if ((title_glow / 2) % 2 == 0) {
+                    letter_col = rainbow_colors[color_idx];
+                } else {
+                    uint16_t orig_colors[] = {COLOR_CYAN, COLOR_YELLOW, COLOR_MAGENTA, COLOR_GREEN};
+                    letter_col = orig_colors[i];
+                }
+                ST7735_DrawChar(letter_x[i], 15, letters[i], letter_col, COLOR_BLACK, TITLE_SIZE);
+            }
+        }
+
+        if ((now - last_blink) >= 400) {
+            last_blink = now;
+            blink_state = (blink_state + 1) % 4;
+            uint16_t blink_colors[] = {COLOR_WHITE, COLOR_YELLOW, COLOR_CYAN, COLOR_MAGENTA};
+            ST7735_DrawStringCentered(112, "Press to Start", blink_colors[blink_state], COLOR_BLACK, 1);
+        }
+
+        delay_ms(33);
+
+        if ((now - anim_start) > 60000) {
+            PRINTF("Intro timeout\r\n");
+            break;
+        }
+    }
+
+    PRINTF("Button pressed - going to menu\r\n");
+
+    /* === Opreste melodia === */
+    Buzzer_Off();
+
+    for (int i = 0; i < 5; i++) {
+        ST7735_DrawRect(i * 15, i * 12, 160 - i * 30, 128 - i * 24, COLOR_WHITE);
+        delay_ms(30);
+    }
+
+    ST7735_FillScreen(COLOR_CYAN);
+    delay_ms(30);
+    ST7735_FillScreen(COLOR_WHITE);
+    delay_ms(50);
+    ST7735_FillScreen(COLOR_BLACK);
+    delay_ms(80);
+
+    g_joy_btn_pressed = false;
+}
+
+void DrawCurrentScreen(void) {
+    switch (g_currentScreen) {
+        case SCREEN_INTRO:
+            PlayIntroAnimation();
+            g_currentScreen = SCREEN_MAIN;
+            g_menuState.selectedIndex = 0;
+            g_needsRedraw = 1;
+            DrawMainScreen();
+            break;
+        case SCREEN_MAIN:
+            g_menuState.maxItems = 2;
+            DrawMainScreen();
+            break;
+        case SCREEN_START:
+            g_menuState.maxItems = 3;
+            DrawStartScreen();
+            break;
+        case SCREEN_SELECT_INPUT:
+            g_menuState.maxItems = 3;
+            DrawSelectInputScreen();
+            break;
+        case SCREEN_SELECT_P1:
+            g_menuState.maxItems = 4;
+            DrawSelectP1Screen();
+            break;
+        case SCREEN_SELECT_P2:
+            g_menuState.maxItems = 4;
+            DrawSelectP2Screen();
+            break;
+        case SCREEN_DIFFICULTY:
+            g_menuState.maxItems = 4;
+            DrawDifficultyScreen();
+            break;
+        case SCREEN_GAMEPLAY:
+            break;
+        case SCREEN_GAME_OVER:
+            g_menuState.maxItems = 2;
+            DrawGameOverScreen();
+            break;
+        case SCREEN_PAUSED:
+            DrawPausedScreen();
+            break;
+    }
+    g_needsRedraw = 0;
+}
+
+/*============================================================================
+ * NAVIGARE MENIU
+ *============================================================================*/
+
+void Menu_MoveUp(void) {
+    if (g_menuState.selectedIndex > 0) g_menuState.selectedIndex--;
+    else g_menuState.selectedIndex = g_menuState.maxItems - 1;
+    g_needsRedraw = 1;
+}
+
+void Menu_MoveDown(void) {
+    g_menuState.selectedIndex++;
+    if (g_menuState.selectedIndex >= g_menuState.maxItems) g_menuState.selectedIndex = 0;
+    g_needsRedraw = 1;
+}
+
+void ChangeScreen(Screen_t newScreen) {
+    g_currentScreen = newScreen;
+    g_menuState.selectedIndex = 0;
+    g_needsRedraw = 1;
+}
+
+void Menu_Select(void) {
+    switch (g_currentScreen) {
+        case SCREEN_MAIN:
+            switch (g_menuState.selectedIndex) {
+                case 0: ChangeScreen(SCREEN_START); break;
+                case 1: ChangeScreen(SCREEN_SELECT_INPUT); break;
+                case 2: PRINTF("Mute Music toggled\r\n"); break;
+            }
+            break;
+
+        case SCREEN_START:
+            switch (g_menuState.selectedIndex) {
+                case 0:
+                    PRINTF("Starting PvP game!\r\n");
+                    if (IsCPUInput(g_player2_input)) g_player2_input = INPUT_REMOTE;
+                    if (g_player1_input == g_player2_input && !IsCPUInput(g_player1_input)) g_player2_input = INPUT_REMOTE;
+                    Game_Start();
+                    break;
+                case 1: ChangeScreen(SCREEN_DIFFICULTY); break;
+                case 2: ChangeScreen(SCREEN_MAIN); break;
+            }
+            break;
+
+        case SCREEN_DIFFICULTY:
+            switch (g_menuState.selectedIndex) {
+                case 0: g_player2_input = INPUT_CPU_EASY; Game_Start(); break;
+                case 1: g_player2_input = INPUT_CPU_MEDIUM; Game_Start(); break;
+                case 2: g_player2_input = INPUT_CPU_HARD; Game_Start(); break;
+                case 3: ChangeScreen(SCREEN_START); break;
+            }
+            break;
+
+        case SCREEN_SELECT_INPUT:
+            switch (g_menuState.selectedIndex) {
+                case 0: ChangeScreen(SCREEN_SELECT_P1); break;
+                case 1: ChangeScreen(SCREEN_SELECT_P2); break;
+                case 2: ChangeScreen(SCREEN_MAIN); break;
+            }
+            break;
+
+        case SCREEN_SELECT_P1:
+            if (g_menuState.selectedIndex == 3) {
+                ChangeScreen(SCREEN_SELECT_INPUT);
+            } else {
+                InputType_t inputMap[] = {INPUT_JOYSTICK, INPUT_REMOTE, INPUT_GYROSCOPE};
+                InputType_t selectedInput = inputMap[g_menuState.selectedIndex];
+
+                if (IsInputAvailable(selectedInput, 1)) {
+                    g_player1_input = selectedInput;
+                    g_currentScreen = SCREEN_SELECT_INPUT;
+                    g_menuState.selectedIndex = 1;
+                    g_needsRedraw = 1;
+                } else {
+                    ST7735_FillRect(20, 105, 120, 20, COLOR_RED);
+                    ST7735_DrawRect(20, 105, 120, 20, COLOR_WHITE);
+                    ST7735_DrawStringCentered(110, "USED BY P2!", COLOR_WHITE, COLOR_RED, 1);
+                    delay_ms(800);
+                    g_needsRedraw = 1;
+                }
+            }
+            break;
+
+        case SCREEN_SELECT_P2:
+            if (g_menuState.selectedIndex == 3) {
+                ChangeScreen(SCREEN_SELECT_INPUT);
+            } else {
+            	InputType_t inputMap[] = {INPUT_JOYSTICK, INPUT_REMOTE, INPUT_GYROSCOPE};
+                InputType_t selectedInput = inputMap[g_menuState.selectedIndex];
+
+                if (IsInputAvailable(selectedInput, 2)) {
+                    g_player2_input = selectedInput;
+                    g_currentScreen = SCREEN_SELECT_INPUT;
+                    g_menuState.selectedIndex = 2;
+                    g_needsRedraw = 1;
+                } else {
+                    ST7735_FillRect(20, 105, 120, 20, COLOR_RED);
+                    ST7735_DrawRect(20, 105, 120, 20, COLOR_WHITE);
+                    ST7735_DrawStringCentered(110, "USED BY P1!", COLOR_WHITE, COLOR_RED, 1);
+                    delay_ms(800);
+                    g_needsRedraw = 1;
+                }
+            }
+            break;
+
+        case SCREEN_GAME_OVER:
+            if (g_menuState.selectedIndex == 0) Game_Start();
+            else ChangeScreen(SCREEN_MAIN);
+            break;
+
+        default:
+            break;
+    }
+}
+
+/*============================================================================
+ * INPUT PROCESSING
+ *============================================================================*/
+
+void ProcessMenuInput(void) {
+    JoyAction_t joy_action = Joystick_GetMenuAction();
+    JoyAction_t ir_action = IR_GetMenuAction();
+    JoyAction_t action = (joy_action != JOY_ACTION_NONE) ? joy_action : ir_action;
+
+    switch (action) {
+        case JOY_ACTION_UP: Menu_MoveUp(); break;
+        case JOY_ACTION_DOWN: Menu_MoveDown(); break;
+        case JOY_ACTION_SELECT: Menu_Select(); break;
+        default: break;
+    }
+}
+
+void ProcessGameInput(void) {
+    if (g_currentScreen == SCREEN_PAUSED) {
+        /* Joystick pentru navigare */
+        Joystick_Process();
+        int16_t joy_y = Joystick_GetY_Percent();
+
+        static bool pause_nav_consumed = false;
+        if (joy_y > 20 && !pause_nav_consumed) {
+            g_pause_selection = 1;           // jos -> Exit
+            pause_nav_consumed = true;
+            g_needsRedraw = 1;
+        } else if (joy_y < -20 && !pause_nav_consumed) {
+            g_pause_selection = 0;           // sus -> Resume
+            pause_nav_consumed = true;
+            g_needsRedraw = 1;
+        } else if (joy_y > -30 && joy_y < 30) {
+            pause_nav_consumed = false;
+        }
+
+        /* Remote pentru navigare + select (UP/DOWN/OK) */
+        JoyAction_t ir_action = IR_GetMenuAction();
+        if (ir_action == JOY_ACTION_UP) {
+            g_pause_selection = 0;           // Resume
+            g_needsRedraw = 1;
+        } else if (ir_action == JOY_ACTION_DOWN) {
+            g_pause_selection = 1;           // Exit
+            g_needsRedraw = 1;
+        }
+
+        bool select_pressed = false;
+
+        /* Joystick buton -> select */
+        if (g_joy_btn_pressed) {
+            g_joy_btn_pressed = false;
+            select_pressed = true;
+        }
+
+        /* Remote OK/POWER -> select (via IR_GetMenuAction) */
+        if (ir_action == JOY_ACTION_SELECT) {
+            select_pressed = true;
+        }
+
+        if (select_pressed) {
+            if (g_pause_selection == 0) {
+                g_currentScreen = SCREEN_GAMEPLAY;
+                game.is_paused = 0;
+                Game_DrawField();
+                Game_DrawScore();
+                PRINTF("[GAME] Resumed\r\n");
+            } else {
+                game.is_running = 0;
+                g_currentScreen = SCREEN_MAIN;
+                g_menuState.selectedIndex = 0;
+                g_needsRedraw = 1;
+                PRINTF("[GAME] Exited to menu\r\n");
+            }
+        }
+
+    } else if (g_currentScreen == SCREEN_GAMEPLAY) {
+        /* Verifica pauza mai intai */
+        bool pause_pressed = false;
+        if (g_joy_btn_pressed) {
+            g_joy_btn_pressed = false;
+            pause_pressed = true;
+        }
+        if (IR_CheckPauseOnly()) {
+            pause_pressed = true;
+        }
+
+        if (pause_pressed) {
+            g_currentScreen = SCREEN_PAUSED;
+            game.is_paused = 1;
+            g_pause_selection = 0;
+            g_needsRedraw = 1;
+            PRINTF("[GAME] Paused\r\n");
+            return;
+        }
+
+        /* Proceseaza IR pentru miscare paleta in gameplay */
+        IR_ProcessGameInput();
+    }
+}
+
+
+/*============================================================================
+ * MAIN
+ *============================================================================*/
+
+int main(void) {
+    BOARD_InitBootPins();
+    BOARD_InitBootClocks();
+    BOARD_InitBootPeripherals();
+    BOARD_InitDebugConsole();
+
+    Timer_Init();
+
+    srand(g_systick_ms ^ 0xDEADBEEF);
+
+    PRINTF("\r\n");
+    PRINTF("========================================\r\n");
+    PRINTF("   PONG GAME - FRDM-KL25Z + ST7735     \r\n");
+    PRINTF("   Joystick + IR Remote + AI Bot       \r\n");
+    PRINTF("   === IR FIX + UI TIMERS ===          \r\n");
+    PRINTF("========================================\r\n\r\n");
+
+    PRINTF("=== PINOUT ===\r\n");
+    PRINTF("DISPLAY: BL->3.3V VCC->3.3V GND->GND\r\n");
+    PRINTF("         SCK->PTC5 SDA->PTC6 DC->PTC3\r\n");
+    PRINTF("         RES->PTC0 CS->PTC4\r\n");
+    PRINTF("JOYSTICK: VRY->PTB1 SW->PTD4\r\n");
+    PRINTF("IR: OUT->PTA12\r\n");
+    PRINTF("==============\r\n\r\n");
+
+    PRINTF("Initializing display...\r\n");
+    ST7735_Init();
+    PRINTF("Display OK!\r\n");
+
+    PRINTF("Initializing joystick...\r\n");
+    Joystick_Init();
+    PRINTF("Joystick OK!\r\n");
+
+    PRINTF("Initializing IR Remote...\r\n");
+    IR_Init();
+    TPM0_Init();
+    PRINTF("IR Remote OK!\r\n\r\n");
+
+    PRINTF("Initializing Gyroscope...\r\n");
+	Gyro_Init();
+	PRINTF("Gyroscope OK!\r\n\r\n");
+
+    PRINTF("Initializing Arcade LEDs...\r\n");
+    LED_Arcade_Init();
+    PRINTF("Arcade LEDs OK!\r\n\r\n");
+
+    PRINTF("Initializing Buzzer...\r\n");
+    Buzzer_Init();
+    PRINTF("Buzzer OK!\r\n\r\n");
+
+    PRINTF("Initializing PIT timers...\r\n");
+    PIT_Init();
+    PRINTF("PIT timers OK!\r\n\r\n");
+
+
+    PRINTF("=== CONTROLS ===\r\n");
+    PRINTF("MENU: Joystick/IR UP/DOWN + Button/OK=Select\r\n");
+    PRINTF("GAME: Joystick/IR UP/DOWN = Move paddle\r\n");
+    PRINTF("      Button/OK = Pause\r\n");
+    PRINTF("      IR: Hold UP/DOWN for continuous move\r\n");
+    PRINTF("================\r\n\r\n");
+
+    DrawCurrentScreen();
+
+    PRINTF(">>> Ready! <<<\r\n\r\n");
+
+    while (1) {
+        Joystick_Process();
+
+        if (Gyro_Check_UART_Data()) {
+			Gyro_Process_Data(g_gyro_rx_buffer);   // => PRINTF "Inclinatie: ..."
+		}
+
+
+
+        if (g_currentScreen == SCREEN_GAMEPLAY) {
+
+            ProcessGameInput();
+
+            if (g_game_tick) {
+            	g_game_tick = 0;
+
+                Game_Update();
+
+                if (!game.is_running && game.winner != 0) {
+                    PRINTF("\r\n=== GAME OVER ===\r\n");
+                    PRINTF("Winner: Player %d\r\n", game.winner);
+                    PRINTF("Score: %d - %d\r\n\r\n", paddle1.score, paddle2.score);
+
+                    g_currentScreen = SCREEN_GAME_OVER;
+                    g_menuState.selectedIndex = 0;
+                    g_needsRedraw = 1;
+                }
+
+                g_p1_move = 0;
+                g_p2_move = 0;
+            }
+
+            UI_PrintStats();
+
+        } else if (g_currentScreen == SCREEN_PAUSED) {
+            ProcessGameInput();
+
+            if (g_needsRedraw) {
+                DrawCurrentScreen();
+            }
+
+        } else {
+            if (g_menu_tick) {
+            	g_menu_tick = 0;
+                ProcessMenuInput();
+            }
+
+            if (g_needsRedraw) {
+                DrawCurrentScreen();
+            }
+        }
+
+//        __WFI();
+    }
+
+    return 0;
+}
